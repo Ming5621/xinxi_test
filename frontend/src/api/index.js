@@ -43,6 +43,25 @@ export const userApi = {
   delete: (id) => api.delete(`/users/${id}`),
 }
 
+export const importApi = {
+  students: (data) => api.post('/import/students', data),
+  studentsFile: (file, defaultPassword = '123456') => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post(`/import/students/file?default_password=${defaultPassword}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  parseQuestions: (data) => api.post('/import/questions/parse', data),
+  parseQuestionsFile: (file, defaultScore = 10) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post(`/import/questions/file?default_score=${defaultScore}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+}
+
 export const examApi = {
   list: () => api.get('/exams'),
   get: (id) => api.get(`/exams/${id}`),

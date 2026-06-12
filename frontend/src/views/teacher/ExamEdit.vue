@@ -35,6 +35,9 @@
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
         <h3>题目列表 <el-tag size="small">{{ form.questions.length }} 题 · 满分 {{ totalScore }} 分</el-tag></h3>
         <div>
+          <el-button @click="importVisible = true">
+            <el-icon><Upload /></el-icon> 批量导入
+          </el-button>
           <el-button @click="addQuestion('choice')">
             <el-icon><Plus /></el-icon> 添加选择题
           </el-button>
@@ -87,6 +90,35 @@
         {{ isEdit ? '保存修改' : '创建考试' }}
       </el-button>
     </div>
+
+    <BatchImportDialog
+      v-model="importVisible"
+      title="批量导入题目"
+      import-mode="parse"
+      format-hint="支持 CSV 表格格式或块格式。CSV 适合 Excel 编辑，块格式适合直接粘贴。"
+      placeholder="[选择] 以下哪个是计算机的中央处理器？
+A. 内存
+B. CPU
+C. 硬盘
+D. 显卡
+答案：B
+分值：10
+
+[判断] RAM断电后数据不会丢失。
+答案：错误
+分值：10"
+      template-filename="题目导入模板.csv"
+      :template-content="questionTemplate"
+      :show-default-score="true"
+      :preview-columns="[
+        { prop: 'type', label: '题型' },
+        { prop: 'content', label: '题目' },
+        { prop: 'correct_answer', label: '答案' },
+        { prop: 'score', label: '分值' },
+      ]"
+      :on-import="handleBatchImport"
+      @success="handleQuestionsImported"
+    />
   </div>
 </template>
 
@@ -94,13 +126,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { examApi } from '@/api'
+import { examApi, importApi } from '@/api'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
+
+const questionTemplate = `类型,题目,选项A,选项B,选项C,选项D,答案,分值
+choice,以下哪个是计算机的中央处理器,内存,CPU,硬盘,显卡,B,10
+choice,操作系统的主要功能不包括,进程管理,内存管理,文字排版,文件管理,C,10
+judge,RAM断电后数据不会丢失,,,,,错误,10
+judge,TCP/IP是互联网通信的基础协议族,,,,,正确,10
+choice,1GB等于多少MB,100,512,1024,2048,C,10`
 
 const route = useRoute()
 const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
 const loading = ref(false)
 const saving = ref(false)
+const importVisible = ref(false)
 
 const form = ref({
   title: '',
@@ -122,6 +163,28 @@ function addQuestion(type) {
     options: type === 'choice' ? ['A. ', 'B. ', 'C. ', 'D. '] : ['正确', '错误'],
   }
   form.value.questions.push(q)
+}
+
+function handleQuestionsImported(questions) {
+  const startOrder = form.value.questions.length
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i]
+    form.value.questions.push({
+      type: q.type,
+      content: q.content,
+      options: [...q.options],
+      correct_answer: q.correct_answer,
+      score: q.score,
+      order_num: startOrder + i,
+    })
+  }
+}
+
+async function handleBatchImport({ text, file, defaultScore }) {
+  if (file) {
+    return importApi.parseQuestionsFile(file, defaultScore)
+  }
+  return importApi.parseQuestions({ text, default_score: defaultScore })
 }
 
 onMounted(async () => {

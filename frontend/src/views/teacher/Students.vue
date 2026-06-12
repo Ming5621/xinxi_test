@@ -8,9 +8,14 @@
     <div class="content-card">
       <div style="display: flex; justify-content: space-between; margin-bottom: 16px">
         <el-input v-model="search" placeholder="搜索学生姓名或用户名" style="width: 300px" clearable :prefix-icon="Search" />
-        <el-button type="primary" @click="showDialog()">
-          <el-icon><Plus /></el-icon> 添加学生
-        </el-button>
+        <div>
+          <el-button @click="importVisible = true">
+            <el-icon><Upload /></el-icon> 批量导入
+          </el-button>
+          <el-button type="primary" @click="showDialog()">
+            <el-icon><Plus /></el-icon> 添加学生
+          </el-button>
+        </div>
       </div>
 
       <el-table :data="filteredStudents" stripe v-loading="loading">
@@ -56,6 +61,26 @@
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+
+    <BatchImportDialog
+      v-model="importVisible"
+      title="批量导入学生"
+      format-hint="支持 CSV/TXT 格式，每行一个学生。可带表头（用户名,姓名,班级,密码），密码可留空使用默认值。"
+      placeholder="用户名,姓名,班级,密码
+student06,张三,微机1班,123456
+student07,李四,微机2班,
+student08,王五,微机2班,123456"
+      template-filename="学生导入模板.csv"
+      :template-content="studentTemplate"
+      :show-default-password="true"
+      :preview-columns="[
+        { prop: 'username', label: '用户名' },
+        { prop: 'name', label: '姓名' },
+        { prop: 'class_name', label: '班级' },
+      ]"
+      :on-import="handleBatchImport"
+      @success="loadStudents"
+    />
   </div>
 </template>
 
@@ -63,13 +88,20 @@
 import { ref, computed, onMounted } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { userApi } from '@/api'
+import { userApi, importApi } from '@/api'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
+
+const studentTemplate = `用户名,姓名,班级,密码
+student06,张三,微机1班,123456
+student07,李四,微机2班,
+student08,王五,微机2班,123456`
 
 const loading = ref(true)
 const saving = ref(false)
 const students = ref([])
 const search = ref('')
 const dialogVisible = ref(false)
+const importVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
 const form = ref({ username: '', name: '', class_name: '', password: '' })
@@ -114,7 +146,7 @@ async function handleSave() {
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
-    students.value = await userApi.list('student')
+    await loadStudents()
   } finally {
     saving.value = false
   }
@@ -124,11 +156,22 @@ async function handleDelete(row) {
   await ElMessageBox.confirm(`确定删除学生「${row.name}」吗？`, '警告', { type: 'warning' })
   await userApi.delete(row.id)
   ElMessage.success('删除成功')
+  await loadStudents()
+}
+
+async function loadStudents() {
   students.value = await userApi.list('student')
 }
 
+async function handleBatchImport({ text, file, defaultPassword }) {
+  if (file) {
+    return importApi.studentsFile(file, defaultPassword)
+  }
+  return importApi.students({ text, default_password: defaultPassword })
+}
+
 onMounted(async () => {
-  students.value = await userApi.list('student')
+  await loadStudents()
   loading.value = false
 })
 </script>

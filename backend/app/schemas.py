@@ -189,3 +189,22 @@ class DashboardStats(BaseModel):
     total_exams: int
     active_exams: int
     completed_sessions: int
+
+
+# Import
+class BatchImportRequest(BaseModel):
+    text: str
+    default_password: str = "123456"
+    default_score: float = 10.0
+
+
+class BatchImportResult(BaseModel):
+    success_count: int
+    fail_count: int
+    errors: list[str] = []
+    preview: list[dict] = []
+
+
+class QuestionParseResult(BaseModel):
+    questions: list[QuestionCreate]
+    errors: list[str] = []

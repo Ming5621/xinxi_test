@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine
-from .routers import auth, exams, stats, users
+from .routers import auth, exams, import_data, stats, users
 
 Base.metadata.create_all(bind=engine)
 
@@ -24,6 +24,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(exams.router)
 app.include_router(stats.router)
+app.include_router(import_data.router)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
