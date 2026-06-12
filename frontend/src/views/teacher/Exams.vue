@@ -22,7 +22,7 @@
         <el-table-column prop="title" label="考试名称" min-width="200" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusTag(row.status)" size="small">{{ statusText[row.status] }}</el-tag>
+            <el-tag :type="statusTag[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="question_count" label="题数" width="80" />

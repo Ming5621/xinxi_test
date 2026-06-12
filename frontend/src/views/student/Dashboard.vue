@@ -9,8 +9,8 @@
       <el-col :xs="24" :sm="12" :lg="8" v-for="exam in exams" :key="exam.id">
         <div class="exam-card" :class="statusClass(exam.status)">
           <div class="exam-status">
-            <el-tag :type="statusTag(exam.status)" effect="dark" size="small">
-              {{ statusText(exam.status) }}
+            <el-tag :type="statusTag[exam.status]" effect="dark" size="small">
+              {{ statusText[exam.status] }}
             </el-tag>
           </div>
           <h3>{{ exam.title }}</h3>
