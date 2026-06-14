@@ -357,13 +357,16 @@ def submit_exam(
         question = question_map[item.question_id]
         meta = item.answer_meta or {}
 
-        if question.type == QuestionType.typing and meta:
+        if question.type == QuestionType.typing:
             comparison = compare_text(question.content, item.student_answer)
-            meta.update({
-                "wpm": calculate_wpm(comparison["correct_chars"], meta.get("duration_seconds", 1)),
+            duration = meta.get("duration_seconds") or max(30, len(item.student_answer))
+            meta = {
+                **meta,
+                "wpm": calculate_wpm(comparison["correct_chars"], duration),
                 "accuracy": comparison["accuracy"],
                 "correct_chars": comparison["correct_chars"],
-            })
+                "duration_seconds": duration,
+            }
 
         answer = Answer(
             session_id=session.id,

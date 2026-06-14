@@ -24,7 +24,7 @@
       ref="inputRef"
       v-model="typedText"
       class="input-box"
-      :disabled="!started || finished || paused || (mode === 'test' && locked)"
+      :disabled="!started || finished || paused"
       :placeholder="started ? '请开始输入...' : '点击开始后在此输入'"
       @input="onInput"
       @keydown="onKeydown"
@@ -69,7 +69,6 @@ const typedText = ref('')
 const started = ref(false)
 const finished = ref(false)
 const paused = ref(false)
-const locked = ref(false)
 const timeLeft = ref(props.timeLimit)
 const elapsed = ref(0)
 const startTime = ref(0)
@@ -149,7 +148,6 @@ async function start() {
   started.value = true
   finished.value = false
   paused.value = false
-  locked.value = props.mode === 'test'
   result.value = null
   typedText.value = ''
   timeLeft.value = props.timeLimit
@@ -192,7 +190,6 @@ function finish() {
   if (finished.value) return
   clearInterval(timer)
   finished.value = true
-  locked.value = false
   elapsed.value = getActiveElapsed()
 
   const stats = calcStats(typedText.value, props.referenceText, elapsed.value)
@@ -222,7 +219,6 @@ function reset() {
   started.value = false
   finished.value = false
   paused.value = false
-  locked.value = false
   result.value = null
   elapsed.value = 0
   timeLeft.value = props.timeLimit
