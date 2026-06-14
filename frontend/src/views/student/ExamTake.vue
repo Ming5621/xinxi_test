@@ -34,7 +34,8 @@
           <TypingTest
             :reference-text="currentQuestion.content"
             :time-limit="currentQuestion.typing_config?.time_limit || 120"
-            :show-standards="false"
+            mode="test"
+            :skip-confirm="true"
             @complete="onTypingComplete(currentQuestion.id, $event)"
           />
         </template>
