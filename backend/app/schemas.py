@@ -1,9 +1,9 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from .models import ExamStatus, QuestionType, SessionStatus, UserRole
+from .models import ExamStatus, QuestionType, SessionStatus, TypingDifficulty, UserRole
 
 
 # Auth
@@ -49,8 +49,8 @@ class UserOut(UserBase):
 class QuestionBase(BaseModel):
     type: QuestionType
     content: str
-    options: list[str] = []
-    correct_answer: str
+    options: Any = []
+    correct_answer: str = ""
     score: float = 5.0
     order_num: int = 0
 
@@ -70,9 +70,10 @@ class QuestionStudentOut(BaseModel):
     id: int
     type: QuestionType
     content: str
-    options: list[str] = []
+    options: Any = []
     score: float
     order_num: int
+    typing_config: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
@@ -119,7 +120,8 @@ class ExamDetailOut(ExamOut):
 # Session & Answer
 class AnswerSubmit(BaseModel):
     question_id: int
-    student_answer: str
+    student_answer: str = ""
+    answer_meta: Optional[dict] = None
 
 
 class ExamSubmitRequest(BaseModel):
@@ -133,6 +135,7 @@ class AnswerOut(BaseModel):
     score: float
     correct_answer: Optional[str] = None
     question_content: Optional[str] = None
+    answer_meta: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
@@ -208,3 +211,65 @@ class BatchImportResult(BaseModel):
 class QuestionParseResult(BaseModel):
     questions: list[QuestionCreate]
     errors: list[str] = []
+
+
+# Typing
+class TypingTextOut(BaseModel):
+    id: int
+    title: str
+    content: str
+    difficulty: TypingDifficulty
+    char_count: int
+    time_limit: int
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class TypingTextCreate(BaseModel):
+    title: str
+    content: str
+    difficulty: TypingDifficulty = TypingDifficulty.basic
+    time_limit: int = 120
+
+
+class TypingSubmitRequest(BaseModel):
+    text_id: Optional[int] = None
+    reference_text: str
+    typed_text: str
+    duration_seconds: float
+    source: str = "practice"
+
+
+class TypingResultOut(BaseModel):
+    wpm: float
+    accuracy: float
+    correct_chars: int
+    error_chars: int
+    total_chars: int
+    level: str
+    level_desc: str
+    passed: bool
+    score: Optional[float] = None
+    remark: Optional[str] = None
+
+
+class TypingRecordOut(BaseModel):
+    id: int
+    text_id: Optional[int]
+    text_title: str = ""
+    source: str
+    wpm: float
+    accuracy: float
+    correct_chars: int
+    level: str
+    duration_seconds: float
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TypingStandardsOut(BaseModel):
+    levels: list[dict]
+    min_accuracy: float
+    description: str

@@ -32,6 +32,14 @@ class ExamStatus(str, enum.Enum):
 class QuestionType(str, enum.Enum):
     choice = "choice"
     judge = "judge"
+    typing = "typing"
+
+
+class TypingDifficulty(str, enum.Enum):
+    beginner = "beginner"
+    basic = "basic"
+    standard = "standard"
+    advanced = "advanced"
 
 
 class SessionStatus(str, enum.Enum):
@@ -114,9 +122,45 @@ class Answer(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("exam_sessions.id"), nullable=False)
     question_id = Column(Integer, ForeignKey("questions.id"), nullable=False)
-    student_answer = Column(String(10), default="")
+    student_answer = Column(Text, default="")
     is_correct = Column(Boolean, default=False)
     score = Column(Float, default=0.0)
+    answer_meta = Column(JSON, default=dict)
 
     session = relationship("ExamSession", back_populates="answers")
     question = relationship("Question", back_populates="answers")
+
+
+class TypingText(Base):
+    """打字练习素材库"""
+    __tablename__ = "typing_texts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    difficulty = Column(Enum(TypingDifficulty), default=TypingDifficulty.basic)
+    char_count = Column(Integer, default=0)
+    time_limit = Column(Integer, default=120)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TypingRecord(Base):
+    """打字练习/测试记录"""
+    __tablename__ = "typing_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    text_id = Column(Integer, ForeignKey("typing_texts.id"), nullable=True)
+    source = Column(String(20), default="practice")  # practice / exam
+    reference_text = Column(Text, nullable=False)
+    typed_text = Column(Text, default="")
+    duration_seconds = Column(Float, default=0)
+    wpm = Column(Float, default=0)
+    accuracy = Column(Float, default=0)
+    correct_chars = Column(Integer, default=0)
+    level = Column(String(20), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    student = relationship("User")
+    text = relationship("TypingText")

@@ -83,4 +83,14 @@ export const statsApi = {
   exam: (id) => api.get(`/stats/exam/${id}`),
 }
 
+export const typingApi = {
+  standards: () => api.get('/typing/standards'),
+  texts: (difficulty) => api.get('/typing/texts', { params: { difficulty } }),
+  submit: (data) => api.post('/typing/submit', data),
+  myRecords: () => api.get('/typing/records/my'),
+  classStats: () => api.get('/typing/records/stats'),
+  createText: (data) => api.post('/typing/texts', data),
+  deleteText: (id) => api.delete(`/typing/texts/${id}`),
+}
+
 export default api

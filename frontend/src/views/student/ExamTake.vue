@@ -23,11 +23,23 @@
     <div class="question-area" v-if="currentQuestion">
       <div class="question-card">
         <div class="question-header">
-          <el-tag :type="currentQuestion.type === 'choice' ? '' : 'warning'" size="small">
-            {{ currentQuestion.type === 'choice' ? '选择题' : '判断题' }}
+          <el-tag :type="typeTag(currentQuestion.type)" size="small">
+            {{ typeLabel(currentQuestion.type) }}
           </el-tag>
           <span class="question-score">{{ currentQuestion.score }} 分</span>
         </div>
+
+        <template v-if="currentQuestion.type === 'typing'">
+          <p class="typing-hint">请在下方输入框中录入以下文字（限时 {{ currentQuestion.typing_config?.time_limit || 120 }} 秒）</p>
+          <TypingTest
+            :reference-text="currentQuestion.content"
+            :time-limit="currentQuestion.typing_config?.time_limit || 120"
+            :show-standards="false"
+            @complete="onTypingComplete(currentQuestion.id, $event)"
+          />
+        </template>
+
+        <template v-else>
         <div class="question-content">{{ currentQuestion.content }}</div>
 
         <div class="options" v-if="currentQuestion.type === 'choice'">
@@ -56,6 +68,7 @@
             <span>{{ opt }}</span>
           </div>
         </div>
+        </template>
       </div>
 
       <div class="question-nav">
@@ -67,7 +80,7 @@
             v-for="(q, i) in questions"
             :key="q.id"
             class="dot"
-            :class="{ active: i === currentIndex, answered: answers[q.id] }"
+            :class="{ active: i === currentIndex, answered: isAnswered(q) }"
             @click="currentIndex = i"
           />
         </div>
@@ -100,6 +113,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { examApi } from '@/api'
+import TypingTest from '@/components/TypingTest.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,11 +123,20 @@ const loading = ref(true)
 const exam = ref(null)
 const questions = ref([])
 const answers = ref({})
+const answerMeta = ref({})
 const currentIndex = ref(0)
 const timeLeft = ref(0)
 let timer = null
 
 const currentQuestion = computed(() => questions.value[currentIndex.value])
+
+const typeLabel = { choice: '选择题', judge: '判断题', typing: '打字题' }
+const typeTag = { choice: '', judge: 'warning', typing: 'success' }
+
+function isAnswered(q) {
+  if (q.type === 'typing') return !!answerMeta.value[q.id]
+  return !!answers.value[q.id]
+}
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60)
@@ -123,6 +146,17 @@ function formatTime(seconds) {
 
 function selectAnswer(qId, value) {
   answers.value[qId] = value
+}
+
+function onTypingComplete(qId, data) {
+  answers.value[qId] = data.typed_text
+  answerMeta.value[qId] = {
+    duration_seconds: data.duration_seconds,
+    wpm: data.wpm,
+    accuracy: data.accuracy,
+    correct_chars: data.correct_chars,
+    level: data.level,
+  }
 }
 
 onMounted(async () => {
@@ -152,7 +186,7 @@ async function autoSubmit() {
 }
 
 async function handleSubmit() {
-  const unanswered = questions.value.filter((q) => !answers.value[q.id])
+  const unanswered = questions.value.filter((q) => !isAnswered(q))
   if (unanswered.length > 0) {
     await ElMessageBox.confirm(
       `还有 ${unanswered.length} 道题未作答，确定提交吗？`,
@@ -170,6 +204,7 @@ async function doSubmit() {
     answers: Object.entries(answers.value).map(([question_id, student_answer]) => ({
       question_id: Number(question_id),
       student_answer,
+      answer_meta: answerMeta.value[question_id] || null,
     })),
   }
   const result = await examApi.submit(examId, payload)
@@ -183,6 +218,12 @@ async function doSubmit() {
 .exam-take {
   max-width: 900px;
   margin: 0 auto;
+}
+
+.typing-hint {
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 16px;
 }
 
 .exam-header {

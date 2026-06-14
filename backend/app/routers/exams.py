@@ -11,9 +11,11 @@ from ..models import (
     ExamSession,
     ExamStatus,
     Question,
+    QuestionType,
     SessionStatus,
     User,
 )
+from ..typing_utils import compare_text, calculate_wpm, parse_typing_config, score_typing_question, get_typing_level
 from ..schemas import (
     ExamCreate,
     ExamDetailOut,
@@ -54,7 +56,20 @@ def _grade_session(session: ExamSession, db: Session):
     existing = {a.question_id: a for a in session.answers}
     for question in exam.questions:
         answer = existing.get(question.id)
-        if answer:
+        if not answer:
+            continue
+
+        if question.type == QuestionType.typing:
+            meta = answer.answer_meta or {}
+            wpm = meta.get("wpm", 0)
+            accuracy = meta.get("accuracy", 0)
+            config = parse_typing_config(question.options)
+            score, passed, remark = score_typing_question(wpm, accuracy, question.score, config)
+            answer.is_correct = passed
+            answer.score = score
+            answer.answer_meta = {**meta, "remark": remark, "level": get_typing_level(wpm)["level"]}
+            total_score += score
+        else:
             is_correct = answer.student_answer.strip().upper() == question.correct_answer.strip().upper()
             answer.is_correct = is_correct
             answer.score = question.score if is_correct else 0.0
@@ -304,7 +319,13 @@ def get_exam_questions(
     if not session or session.status == SessionStatus.submitted:
         raise HTTPException(status_code=400, detail="请先开始考试")
 
-    return [QuestionStudentOut.model_validate(q) for q in exam.questions]
+    result = []
+    for q in exam.questions:
+        item = QuestionStudentOut.model_validate(q)
+        if q.type == QuestionType.typing:
+            item.typing_config = parse_typing_config(q.options)
+        result.append(item)
+    return result
 
 
 @router.post("/{exam_id}/submit", response_model=SessionOut)
@@ -333,10 +354,22 @@ def submit_exam(
     for item in data.answers:
         if item.question_id not in question_map:
             continue
+        question = question_map[item.question_id]
+        meta = item.answer_meta or {}
+
+        if question.type == QuestionType.typing and meta:
+            comparison = compare_text(question.content, item.student_answer)
+            meta.update({
+                "wpm": calculate_wpm(comparison["correct_chars"], meta.get("duration_seconds", 1)),
+                "accuracy": comparison["accuracy"],
+                "correct_chars": comparison["correct_chars"],
+            })
+
         answer = Answer(
             session_id=session.id,
             question_id=item.question_id,
             student_answer=item.student_answer,
+            answer_meta=meta,
         )
         db.add(answer)
 
@@ -416,8 +449,9 @@ def get_session_detail(
                 "student_answer": ans.student_answer,
                 "is_correct": ans.is_correct,
                 "score": ans.score,
-                "correct_answer": q.correct_answer if session.status == SessionStatus.submitted else None,
+                "correct_answer": q.correct_answer if session.status == SessionStatus.submitted and q.type != QuestionType.typing else None,
                 "question_content": q.content,
+                "answer_meta": ans.answer_meta,
             }
         )
 

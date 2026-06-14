@@ -16,6 +16,7 @@ const routes = [
       { path: 'exam/:id', name: 'TakeExam', component: () => import('@/views/student/ExamTake.vue') },
       { path: 'results', name: 'MyResults', component: () => import('@/views/student/MyResults.vue') },
       { path: 'results/:id', name: 'ResultDetail', component: () => import('@/views/student/ResultDetail.vue') },
+      { path: 'typing', name: 'TypingPractice', component: () => import('@/views/student/TypingPractice.vue') },
     ],
   },
   {
@@ -30,6 +31,7 @@ const routes = [
       { path: 'exams/:id/edit', name: 'ExamEdit', component: () => import('@/views/teacher/ExamEdit.vue') },
       { path: 'exams/:id/stats', name: 'ExamStats', component: () => import('@/views/teacher/ExamStats.vue') },
       { path: 'exams/:id/results', name: 'ExamResults', component: () => import('@/views/teacher/ExamResults.vue') },
+      { path: 'typing', name: 'TypingStats', component: () => import('@/views/teacher/TypingStats.vue') },
     ],
   },
   {

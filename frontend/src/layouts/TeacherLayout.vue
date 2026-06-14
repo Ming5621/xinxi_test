@@ -28,6 +28,10 @@
           <el-icon><Document /></el-icon>
           <span>考试管理</span>
         </el-menu-item>
+        <el-menu-item index="/teacher/typing">
+          <el-icon><EditPen /></el-icon>
+          <span>打字统计</span>
+        </el-menu-item>
       </el-menu>
 
       <div class="sidebar-footer">
@@ -82,6 +86,7 @@ const breadcrumbMap = {
   ExamEdit: '编辑考试',
   ExamStats: '考试统计',
   ExamResults: '考试成绩',
+  TypingStats: '打字统计',
 }
 
 const breadcrumb = computed(() => breadcrumbMap[route.name] || '')

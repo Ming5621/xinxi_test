@@ -34,9 +34,14 @@
           </el-tag>
         </div>
         <p class="answer-question">{{ ans.question_content }}</p>
-        <div class="answer-detail">
+        <div class="answer-detail" v-if="ans.answer_meta?.wpm">
+          <span>打字速度: <strong>{{ ans.answer_meta.wpm }} 字/分钟</strong></span>
+          <span>准确率: <strong>{{ ans.answer_meta.accuracy }}%</strong></span>
+          <span>等级: <el-tag size="small">{{ ans.answer_meta.level }}</el-tag></span>
+        </div>
+        <div class="answer-detail" v-else>
           <span>你的答案: <strong :class="ans.is_correct ? 'correct' : 'wrong'">{{ ans.student_answer || '未作答' }}</strong></span>
-          <span v-if="!ans.is_correct">正确答案: <strong class="correct">{{ ans.correct_answer }}</strong></span>
+          <span v-if="!ans.is_correct && ans.correct_answer">正确答案: <strong class="correct">{{ ans.correct_answer }}</strong></span>
         </div>
       </div>
     </div>

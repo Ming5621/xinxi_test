@@ -44,14 +44,17 @@
           <el-button @click="addQuestion('judge')">
             <el-icon><Plus /></el-icon> 添加判断题
           </el-button>
+          <el-button type="success" @click="addQuestion('typing')">
+            <el-icon><EditPen /></el-icon> 添加打字题
+          </el-button>
         </div>
       </div>
 
       <div v-for="(q, index) in form.questions" :key="index" class="question-editor">
         <div class="q-header">
           <span class="q-num">第 {{ index + 1 }} 题</span>
-          <el-tag :type="q.type === 'choice' ? '' : 'warning'" size="small">
-            {{ q.type === 'choice' ? '选择题' : '判断题' }}
+          <el-tag :type="q.type === 'choice' ? '' : q.type === 'judge' ? 'warning' : 'success'" size="small">
+            {{ q.type === 'choice' ? '选择题' : q.type === 'judge' ? '判断题' : '打字题' }}
           </el-tag>
           <div class="q-actions">
             <el-input-number v-model="q.score" :min="1" :max="100" size="small" style="width: 100px" />
@@ -62,9 +65,27 @@
           </div>
         </div>
 
-        <el-input v-model="q.content" type="textarea" :rows="2" placeholder="请输入题目内容" style="margin-bottom: 12px" />
+        <el-input v-model="q.content" type="textarea" :rows="q.type === 'typing' ? 4 : 2" :placeholder="q.type === 'typing' ? '请输入需要学生录入的文本内容' : '请输入题目内容'" style="margin-bottom: 12px" />
 
-        <template v-if="q.type === 'choice'">
+        <template v-if="q.type === 'typing'">
+          <el-row :gutter="12">
+            <el-col :span="8">
+              <span class="config-label">限时（秒）</span>
+              <el-input-number v-model="q.typing_config.time_limit" :min="30" :max="600" size="small" />
+            </el-col>
+            <el-col :span="8">
+              <span class="config-label">达标速度（字/分）</span>
+              <el-input-number v-model="q.typing_config.min_wpm" :min="5" :max="60" size="small" />
+            </el-col>
+            <el-col :span="8">
+              <span class="config-label">最低准确率（%）</span>
+              <el-input-number v-model="q.typing_config.min_accuracy" :min="60" :max="100" size="small" />
+            </el-col>
+          </el-row>
+          <p class="typing-standard-hint">参考标准：中考 10字/分 · 课标达标 30字/分 · 准确率 ≥95%</p>
+        </template>
+
+        <template v-else-if="q.type === 'choice'">
           <div v-for="(opt, oi) in q.options" :key="oi" class="option-row">
             <el-radio v-model="q.correct_answer" :value="['A','B','C','D'][oi]">
               {{ ['A','B','C','D'][oi] }}
@@ -157,10 +178,15 @@ function addQuestion(type) {
   const q = {
     type,
     content: '',
-    score: 10,
+    score: type === 'typing' ? 18 : 10,
     order_num: form.value.questions.length,
-    correct_answer: type === 'choice' ? 'A' : '正确',
-    options: type === 'choice' ? ['A. ', 'B. ', 'C. ', 'D. '] : ['正确', '错误'],
+    correct_answer: type === 'choice' ? 'A' : type === 'judge' ? '正确' : '',
+    options: type === 'choice' ? ['A. ', 'B. ', 'C. ', 'D. '] : type === 'judge' ? ['正确', '错误'] : {
+      time_limit: 120, min_wpm: 10, pass_wpm: 20, excellent_wpm: 30, min_accuracy: 95,
+    },
+    typing_config: type === 'typing' ? {
+      time_limit: 120, min_wpm: 10, pass_wpm: 20, excellent_wpm: 30, min_accuracy: 95,
+    } : undefined,
   }
   form.value.questions.push(q)
 }
@@ -199,10 +225,17 @@ onMounted(async () => {
       questions: exam.questions.map((q) => ({
         type: q.type,
         content: q.content,
-        options: [...q.options],
-        correct_answer: q.correct_answer,
+        options: q.type === 'typing' ? (typeof q.options === 'object' && !Array.isArray(q.options) ? q.options : {}) : [...(q.options || [])],
+        correct_answer: q.correct_answer || q.content,
         score: q.score,
         order_num: q.order_num,
+        typing_config: q.type === 'typing' ? {
+          time_limit: q.options?.time_limit || 120,
+          min_wpm: q.options?.min_wpm || 10,
+          pass_wpm: q.options?.pass_wpm || 20,
+          excellent_wpm: q.options?.excellent_wpm || 30,
+          min_accuracy: q.options?.min_accuracy || 95,
+        } : undefined,
       })),
     }
     loading.value = false
@@ -218,11 +251,34 @@ async function handleSave() {
 
   saving.value = true
   try {
+    const payload = {
+      ...form.value,
+      questions: form.value.questions.map((q) => {
+        if (q.type === 'typing') {
+          return {
+            type: q.type,
+            content: q.content,
+            options: q.typing_config || {},
+            correct_answer: q.content,
+            score: q.score,
+            order_num: q.order_num,
+          }
+        }
+        return {
+          type: q.type,
+          content: q.content,
+          options: q.options,
+          correct_answer: q.correct_answer,
+          score: q.score,
+          order_num: q.order_num,
+        }
+      }),
+    }
     if (isEdit.value) {
-      await examApi.update(Number(route.params.id), form.value)
+      await examApi.update(Number(route.params.id), payload)
       ElMessage.success('保存成功')
     } else {
-      await examApi.create(form.value)
+      await examApi.create(payload)
       ElMessage.success('创建成功')
     }
     router.push('/teacher/exams')
@@ -265,5 +321,18 @@ async function handleSave() {
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
+}
+
+.config-label {
+  display: block;
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.typing-standard-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #9ca3af;
 }
 </style>

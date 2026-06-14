@@ -19,6 +19,9 @@
       <router-link to="/student" class="nav-item" :class="{ active: $route.name === 'StudentHome' }">
         <el-icon><HomeFilled /></el-icon> 考试大厅
       </router-link>
+      <router-link to="/student/typing" class="nav-item" :class="{ active: $route.name === 'TypingPractice' }">
+        <el-icon><EditPen /></el-icon> 打字练习
+      </router-link>
       <router-link to="/student/results" class="nav-item" :class="{ active: $route.path.includes('results') }">
         <el-icon><Document /></el-icon> 我的成绩
       </router-link>
