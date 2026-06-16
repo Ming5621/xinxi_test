@@ -1,11 +1,10 @@
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine
+from .paths import get_static_dir
 from .routers import auth, exams, import_data, stats, typing, users
 
 Base.metadata.create_all(bind=engine)
@@ -27,7 +26,7 @@ app.include_router(stats.router)
 app.include_router(import_data.router)
 app.include_router(typing.router)
 
-STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+STATIC_DIR = get_static_dir()
 
 
 @app.get("/api/health")

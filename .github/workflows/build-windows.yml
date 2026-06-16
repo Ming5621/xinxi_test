@@ -1,0 +1,52 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [cursor/exam-system-e01f, main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'packaging/**'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pyinstaller==6.11.1
+
+      - name: PyInstaller build
+        run: pyinstaller packaging/exam_system.spec --noconfirm --clean
+
+      - name: Create zip
+        run: |
+          Compress-Archive -Path "dist\微机教室考试系统\*" -DestinationPath "release\微机教室考试系统.zip" -Force
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 微机教室考试系统-Windows
+          path: |
+            dist/微机教室考试系统/
+            release/微机教室考试系统.zip
+          retention-days: 30

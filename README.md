@@ -20,7 +20,41 @@
 | 前端 | Vue 3 + Vite + Element Plus + Pinia |
 | 认证 | JWT Token |
 
-## 快速开始
+## Windows 打包（exe 安装版）
+
+无需安装 Python / Node.js，教师机双击即可使用。
+
+### 获取安装包
+
+**方式一：自行打包（需 Windows 电脑）**
+
+```bat
+packaging\build_windows.bat
+```
+
+生成文件：
+- `dist\微机教室考试系统\ExamSystem.exe` — 绿色版程序
+- `release\微机教室考试系统.zip` — 可直接分发
+- `release\微机教室考试系统_Setup.exe` — 安装版（需 Inno Setup，运行 `packaging\build_installer.bat`）
+
+**方式二：GitHub Actions 自动构建**
+
+在 GitHub 仓库 Actions 页面下载 `微机教室考试系统-Windows` 构建产物。
+
+### 教师机使用
+
+1. 解压 zip 或运行安装程序
+2. 双击 **`ExamSystem.exe`** 或 **`启动考试系统.bat`**
+3. 浏览器自动打开，学生机访问窗口显示的 IP 地址（如 `http://192.168.1.100:8000`）
+4. 关闭命令行窗口即停止服务
+
+数据保存在：`%APPDATA%\微机教室考试系统\`
+
+详细说明见 [packaging/README.md](packaging/README.md)
+
+---
+
+## 快速开始（开发模式）
 
 ### 环境要求
 
