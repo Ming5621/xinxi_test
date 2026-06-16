@@ -114,5 +114,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="微机教室考试系统",
+    name="ExamSystem",
 )

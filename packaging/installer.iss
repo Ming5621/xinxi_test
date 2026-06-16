@@ -29,7 +29,7 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项:"
 
 [Files]
-Source: "..\dist\微机教室考试系统\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\ExamSystem\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -45,7 +45,7 @@ Type: dirifempty; Name: "{userappdata}\微机教室考试系统"
 [Code]
 function InitializeSetup(): Boolean;
 begin
-  if not FileExists(ExpandConstant('{src}\..\dist\微机教室考试系统\ExamSystem.exe')) then
+  if not FileExists(ExpandConstant('{src}\..\dist\ExamSystem\ExamSystem.exe')) then
   begin
     MsgBox('请先运行 build_windows.bat 生成程序文件！', mbError, MB_OK);
     Result := False;

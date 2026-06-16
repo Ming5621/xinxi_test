@@ -72,19 +72,19 @@ if errorlevel 1 (
 echo [5/5] 生成发布包...
 if not exist "release" mkdir release
 
-copy /Y packaging\启动考试系统.bat "dist\微机教室考试系统\启动考试系统.bat" >nul
+copy /Y packaging\启动考试系统.bat "dist\ExamSystem\启动考试系统.bat" >nul
 
 :: 压缩为 zip
-powershell -Command "Compress-Archive -Path 'dist\微机教室考试系统\*' -DestinationPath 'release\微机教室考试系统.zip' -Force"
+powershell -Command "New-Item -ItemType Directory -Force -Path release | Out-Null; Compress-Archive -Path 'dist\ExamSystem\*' -DestinationPath 'release\ExamSystem.zip' -Force"
 
 echo.
 echo ================================================
 echo   打包完成！
 echo ================================================
 echo.
-echo 程序目录: dist\微机教室考试系统\
-echo 启动程序: dist\微机教室考试系统\ExamSystem.exe
-echo 压缩包:   release\微机教室考试系统.zip
+echo 程序目录: dist\ExamSystem\
+echo 启动程序: dist\ExamSystem\ExamSystem.exe
+echo 压缩包:   release\ExamSystem.zip
 echo.
 echo 使用方法:
 echo   1. 将 dist\微机教室考试系统 文件夹复制到教师机
