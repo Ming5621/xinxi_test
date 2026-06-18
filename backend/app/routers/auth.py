@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,10 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已被禁用")
+
+    user.last_seen_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
 
     token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(access_token=token, user=UserOut.model_validate(user))

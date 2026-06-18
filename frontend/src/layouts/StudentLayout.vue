@@ -37,9 +37,12 @@
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { useHeartbeat } from '@/composables/useHeartbeat'
 
 const router = useRouter()
 const auth = useAuthStore()
+
+useHeartbeat()
 
 async function handleLogout() {
   await ElMessageBox.confirm('确定要退出登录吗？', '提示', { type: 'warning' })

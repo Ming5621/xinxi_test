@@ -58,6 +58,7 @@ class User(Base):
     class_name = Column(String(100), default="")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, nullable=True)
 
     exam_sessions = relationship("ExamSession", back_populates="student")
 

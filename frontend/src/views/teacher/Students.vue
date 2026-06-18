@@ -6,9 +6,13 @@
     </div>
 
     <div class="content-card">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 16px">
+      <div class="toolbar">
         <el-input v-model="search" placeholder="搜索学生姓名或用户名" style="width: 300px" clearable :prefix-icon="Search" />
-        <div>
+        <div class="toolbar-right">
+          <span class="online-summary">
+            <span class="online-dot"></span>
+            在线 {{ onlineCount }} / {{ students.length }}
+          </span>
           <el-button @click="importVisible = true">
             <el-icon><Upload /></el-icon> 批量导入
           </el-button>
@@ -22,15 +26,23 @@
         <el-table-column prop="username" label="用户名" width="140" />
         <el-table-column prop="name" label="姓名" width="120" />
         <el-table-column prop="class_name" label="班级" width="140" />
-        <el-table-column label="状态" width="100">
+        <el-table-column label="在线" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.is_online ? 'success' : 'info'" size="small" effect="plain">
+              <span class="status-dot" :class="{ online: row.is_online }"></span>
+              {{ row.is_online ? '在线' : '离线' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="账号" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
               {{ row.is_active ? '正常' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="180">
-          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        <el-table-column label="最近活跃" width="180">
+          <template #default="{ row }">{{ formatLastSeen(row.last_seen_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
@@ -85,10 +97,10 @@ student08,王五,微机2班,123456"
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { userApi, importApi } from '@/api'
+import { presenceApi, userApi, importApi } from '@/api'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 
 const studentTemplate = `用户名,姓名,班级,密码
@@ -120,8 +132,13 @@ const filteredStudents = computed(() => {
   )
 })
 
-function formatDate(d) {
-  return new Date(d).toLocaleString('zh-CN')
+const onlineCount = computed(() => students.value.filter((s) => s.is_online).length)
+
+let refreshTimer = null
+
+function formatLastSeen(value) {
+  if (!value) return '从未登录'
+  return new Date(value).toLocaleString('zh-CN')
 }
 
 function showDialog(row = null) {
@@ -160,7 +177,7 @@ async function handleDelete(row) {
 }
 
 async function loadStudents() {
-  students.value = await userApi.list('student')
+  students.value = await presenceApi.students()
 }
 
 async function handleBatchImport({ text, file, defaultPassword }) {
@@ -173,5 +190,49 @@ async function handleBatchImport({ text, file, defaultPassword }) {
 onMounted(async () => {
   await loadStudents()
   loading.value = false
+  refreshTimer = setInterval(loadStudents, 10000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
+
+<style scoped>
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.online-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.online-dot,
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d1d5db;
+  display: inline-block;
+}
+
+.online-dot,
+.status-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+}
+</style>

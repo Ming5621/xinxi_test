@@ -78,6 +78,12 @@ export const examApi = {
   examSessions: (id) => api.get(`/exams/${id}/sessions`),
 }
 
+export const presenceApi = {
+  heartbeat: () => api.post('/presence/heartbeat'),
+  students: () => api.get('/presence/students'),
+  summary: () => api.get('/presence/summary'),
+}
+
 export const statsApi = {
   dashboard: () => api.get('/stats/dashboard'),
   exam: (id) => api.get(`/stats/exam/${id}`),

@@ -23,6 +23,12 @@ if "answers" in inspector.get_table_names():
             # SQLite 无法直接改类型，新库会直接用 Text
             pass
 
+if "users" in inspector.get_table_names():
+    user_cols = {c["name"] for c in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        if "last_seen_at" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_seen_at DATETIME"))
+
 db = SessionLocal()
 
 if db.query(User).filter(User.username == "teacher").first() is None:

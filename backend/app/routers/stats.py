@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,22 @@ from ..schemas import DashboardStats, ExamStatistics, QuestionStat
 
 router = APIRouter(prefix="/api/stats", tags=["统计分析"])
 
+ONLINE_THRESHOLD_SECONDS = 45
+
+
+def _count_online_students(db: Session) -> int:
+    cutoff = datetime.utcnow() - timedelta(seconds=ONLINE_THRESHOLD_SECONDS)
+    return (
+        db.query(User)
+        .filter(
+            User.role == UserRole.student,
+            User.is_active == True,
+            User.last_seen_at.isnot(None),
+            User.last_seen_at >= cutoff,
+        )
+        .count()
+    )
+
 
 @router.get("/dashboard", response_model=DashboardStats)
 def dashboard_stats(db: Session = Depends(get_db), _: User = Depends(require_teacher)):
@@ -15,6 +33,7 @@ def dashboard_stats(db: Session = Depends(get_db), _: User = Depends(require_tea
 
     return DashboardStats(
         total_students=db.query(User).filter(User.role == UserRole.student).count(),
+        online_students=_count_online_students(db),
         total_exams=db.query(Exam).count(),
         active_exams=db.query(Exam).filter(Exam.status == ExamStatus.published).count(),
         completed_sessions=db.query(ExamSession).filter(ExamSession.status == SessionStatus.submitted).count(),

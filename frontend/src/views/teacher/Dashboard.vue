@@ -6,7 +6,7 @@
     </div>
 
     <el-row :gutter="20" v-loading="loading">
-      <el-col :xs="12" :sm="6" v-for="item in statCards" :key="item.label">
+      <el-col :xs="12" :sm="6" :lg="4" v-for="item in statCards" :key="item.label">
         <div class="stat-card">
           <div class="stat-icon" :style="{ background: item.bg }">
             <el-icon :style="{ color: item.color }"><component :is="item.icon" /></el-icon>
@@ -68,29 +68,40 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { statsApi, examApi } from '@/api'
 
 const loading = ref(true)
 const stats = ref({})
 const exams = ref([])
+let refreshTimer = null
 
 const statusText = { draft: '草稿', published: '进行中', ended: '已结束' }
 const statusTag = { draft: 'info', published: 'success', ended: 'warning' }
 
 const statCards = computed(() => [
   { label: '学生总数', value: stats.value.total_students || 0, icon: 'User', bg: '#eef2ff', color: '#4f46e5' },
-  { label: '考试总数', value: stats.value.total_exams || 0, icon: 'Document', bg: '#ecfdf5', color: '#10b981' },
+  { label: '在线学生', value: stats.value.online_students || 0, icon: 'Connection', bg: '#ecfdf5', color: '#10b981' },
+  { label: '考试总数', value: stats.value.total_exams || 0, icon: 'Document', bg: '#f0f9ff', color: '#0ea5e9' },
   { label: '进行中', value: stats.value.active_exams || 0, icon: 'Timer', bg: '#fff7ed', color: '#f59e0b' },
   { label: '已完成', value: stats.value.completed_sessions || 0, icon: 'CircleCheck', bg: '#fdf2f8', color: '#ec4899' },
 ])
 
 onMounted(async () => {
+  await refreshDashboard()
+  refreshTimer = setInterval(refreshDashboard, 10000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
+
+async function refreshDashboard() {
   const [s, e] = await Promise.all([statsApi.dashboard(), examApi.list()])
   stats.value = s
   exams.value = e.slice(0, 5)
   loading.value = false
-})
+}
 </script>
 
 <style scoped>

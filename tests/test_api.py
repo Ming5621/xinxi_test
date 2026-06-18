@@ -176,6 +176,7 @@ if test_exam_id:
 
     code, dash = req("GET", "/stats/dashboard", token=teacher_token)
     check("控制台统计", code == 200 and dash.get("total_students", 0) >= 5)
+    check("控制台含在线人数", "online_students" in dash)
 
     # 清理：结束并删除测试考试
     code, _ = req("POST", f"/exams/{test_exam_id}/end", token=teacher_token)
@@ -205,14 +206,32 @@ check("查看打字记录", code == 200)
 code, class_stats = req("GET", "/typing/records/stats", token=teacher_token)
 check("教师打字统计", code == 200)
 
-# 10. 权限测试
+# 10. 在线状态
+code, hb = req("POST", "/presence/heartbeat", token=student_token)
+check("学生心跳", code == 200 and hb.get("ok") is True)
+
+code, _ = req("POST", "/presence/heartbeat", token=teacher_token)
+check("教师无法发送心跳", code == 403)
+
+code, presence_list = req("GET", "/presence/students", token=teacher_token)
+check("教师查看学生在线状态", code == 200 and len(presence_list) >= 5)
+online = [s for s in presence_list if s.get("is_online")]
+check("学生登录后显示在线", len(online) >= 1)
+
+code, summary = req("GET", "/presence/summary", token=teacher_token)
+check("在线汇总", code == 200 and summary.get("online_students", 0) >= 1)
+
+# 11. 权限测试
 code, _ = req("GET", "/users", token=student_token)
 check("学生无法访问用户管理", code == 403)
 
 code, _ = req("GET", "/stats/dashboard", token=student_token)
 check("学生无法访问教师统计", code == 403)
 
-# 11. 无 token 访问
+code, _ = req("GET", "/presence/students", token=student_token)
+check("学生无法查看在线状态", code == 403)
+
+# 12. 无 token 访问
 code, _ = req("GET", "/exams")
 check("未登录拒绝", code == 401)
 

@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine
 from .paths import get_static_dir
-from .routers import auth, exams, import_data, stats, typing, users
+from .routers import auth, exams, import_data, presence, stats, typing, users
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,6 +21,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(presence.router)
 app.include_router(exams.router)
 app.include_router(stats.router)
 app.include_router(import_data.router)

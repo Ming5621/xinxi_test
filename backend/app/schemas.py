@@ -189,9 +189,29 @@ class ExamStatistics(BaseModel):
 
 class DashboardStats(BaseModel):
     total_students: int
+    online_students: int
     total_exams: int
     active_exams: int
     completed_sessions: int
+
+
+class StudentPresenceOut(BaseModel):
+    id: int
+    username: str
+    name: str
+    class_name: str
+    is_active: bool
+    is_online: bool
+    last_seen_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PresenceSummary(BaseModel):
+    total_students: int
+    online_students: int
+    offline_students: int
+    online_threshold_seconds: int
 
 
 # Import
