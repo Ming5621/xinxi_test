@@ -1,5 +1,5 @@
 <template>
-  <div class="typing-panel">
+  <div class="typing-panel" :class="{ expanded }">
     <!-- 简洁状态栏 -->
     <div class="status-bar" v-if="started">
       <span>{{ liveWpm }} 字/分</span>
@@ -61,6 +61,7 @@ const props = defineProps({
   mode: { type: String, default: 'free' }, // free | test
   timeLimit: { type: Number, default: 300 },
   skipConfirm: { type: Boolean, default: false },
+  expanded: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['complete', 'started', 'finished'])
@@ -240,12 +241,23 @@ defineExpose({ reset })
   gap: 12px;
 }
 
+.typing-panel.expanded {
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+}
+
 .status-bar {
   display: flex;
   gap: 20px;
   font-size: 14px;
   color: #6b7280;
   padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.typing-panel.expanded .status-bar {
+  font-size: 15px;
 }
 
 .status-bar span { font-variant-numeric: tabular-nums; }
@@ -263,6 +275,16 @@ defineExpose({ reset })
   max-height: 280px;
   overflow-y: auto;
   color: #374151;
+}
+
+.typing-panel.expanded .article-box {
+  flex: 1.2;
+  min-height: 220px;
+  max-height: none;
+  padding: 24px 28px;
+  font-size: 22px;
+  line-height: 2.1;
+  letter-spacing: 1.5px;
 }
 
 .char.idle { color: #9ca3af; }
@@ -284,6 +306,15 @@ defineExpose({ reset })
   transition: border-color 0.2s;
 }
 
+.typing-panel.expanded .input-box {
+  flex: 1;
+  min-height: 180px;
+  padding: 20px 24px;
+  font-size: 22px;
+  line-height: 2;
+  resize: none;
+}
+
 .input-box:focus { border-color: #4f46e5; }
 .input-box:disabled { background: #f9fafb; color: #9ca3af; }
 
@@ -291,6 +322,7 @@ defineExpose({ reset })
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .result-brief {
