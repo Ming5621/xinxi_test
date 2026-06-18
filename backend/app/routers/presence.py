@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_student, require_teacher
 from ..database import get_db
 from ..models import User, UserRole
+from ..permissions import apply_student_scope, filter_class_name
 from ..schemas import PresenceSummary, StudentPresenceOut
 
 router = APIRouter(prefix="/api/presence", tags=["在线状态"])
@@ -43,24 +44,27 @@ def heartbeat(
 
 @router.get("/students", response_model=list[StudentPresenceOut])
 def list_student_presence(
+    class_name: str | None = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
-    students = (
-        db.query(User)
-        .filter(User.role == UserRole.student)
-        .order_by(User.class_name, User.id)
-        .all()
-    )
+    class_name = filter_class_name(current_user, class_name)
+    query = db.query(User)
+    query = apply_student_scope(query, current_user, class_name)
+    students = query.order_by(User.class_name, User.id).all()
     return [_student_presence(student) for student in students]
 
 
 @router.get("/summary", response_model=PresenceSummary)
 def presence_summary(
+    class_name: str | None = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
-    students = db.query(User).filter(User.role == UserRole.student, User.is_active == True).all()
+    class_name = filter_class_name(current_user, class_name)
+    query = db.query(User).filter(User.role == UserRole.student, User.is_active == True)
+    query = apply_student_scope(query, current_user, class_name)
+    students = query.all()
     online = sum(1 for student in students if _is_online(student.last_seen_at))
     total = len(students)
     return PresenceSummary(

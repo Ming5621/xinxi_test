@@ -28,14 +28,31 @@ if "users" in inspector.get_table_names():
     with engine.begin() as conn:
         if "last_seen_at" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN last_seen_at DATETIME"))
+        if "assigned_classes" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN assigned_classes JSON DEFAULT '[]'"))
 
 if "typing_records" in inspector.get_table_names():
     typing_cols = {c["name"] for c in inspector.get_columns("typing_records")}
     with engine.begin() as conn:
         if "score" not in typing_cols:
             conn.execute(text("ALTER TABLE typing_records ADD COLUMN score FLOAT DEFAULT 0"))
+        if "typing_session_id" not in typing_cols:
+            conn.execute(text("ALTER TABLE typing_records ADD COLUMN typing_session_id INTEGER"))
 
 db = SessionLocal()
+
+if db.query(User).filter(User.username == "admin").first() is None:
+    db.add(
+        User(
+            username="admin",
+            password_hash=get_password_hash("admin123"),
+            name="系统管理员",
+            role=UserRole.admin,
+            assigned_classes=[],
+        )
+    )
+    db.commit()
+    print("✓ 创建管理员账号: admin / admin123")
 
 if db.query(User).filter(User.username == "teacher").first() is None:
     teacher = User(
@@ -43,10 +60,29 @@ if db.query(User).filter(User.username == "teacher").first() is None:
         password_hash=get_password_hash("teacher123"),
         name="张老师",
         role=UserRole.teacher,
+        assigned_classes=["微机1班"],
     )
     db.add(teacher)
     db.commit()
-    print("✓ 创建教师账号: teacher / teacher123")
+    print("✓ 创建教师账号: teacher / teacher123 (管理微机1班)")
+else:
+    teacher = db.query(User).filter(User.username == "teacher").first()
+    if teacher and not teacher.assigned_classes:
+        teacher.assigned_classes = ["微机1班"]
+        db.commit()
+
+if db.query(User).filter(User.username == "teacher2").first() is None:
+    db.add(
+        User(
+            username="teacher2",
+            password_hash=get_password_hash("teacher123"),
+            name="李老师",
+            role=UserRole.teacher,
+            assigned_classes=["微机2班"],
+        )
+    )
+    db.commit()
+    print("✓ 创建教师账号: teacher2 / teacher123 (管理微机2班)")
 
 students_data = [
     ("student01", "李明", "微机1班"),

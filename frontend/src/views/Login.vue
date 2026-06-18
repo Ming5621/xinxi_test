@@ -67,11 +67,14 @@
         </el-form>
 
         <div class="login-hint">
+          <p>管理员: <code>admin</code> / <code>admin123</code></p>
           <p>教师账号: <code>teacher</code> / <code>teacher123</code></p>
           <p>学生账号: <code>student01</code> / <code>123456</code></p>
         </div>
       </div>
     </div>
+
+    <CopyrightFooter class="login-footer" />
   </div>
 </template>
 
@@ -81,6 +84,7 @@ import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import CopyrightFooter from '@/components/CopyrightFooter.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -93,13 +97,19 @@ const rules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
+function homePath(role) {
+  if (role === 'admin') return '/admin'
+  if (role === 'teacher') return '/teacher'
+  return '/student'
+}
+
 async function handleLogin() {
   await formRef.value.validate()
   loading.value = true
   try {
     const user = await auth.login(form.username, form.password)
     ElMessage.success(`欢迎回来，${user.name}！`)
-    router.push(user.role === 'teacher' ? '/teacher' : '/student')
+    router.push(homePath(user.role))
   } finally {
     loading.value = false
   }
@@ -110,6 +120,7 @@ async function handleLogin() {
 .login-page {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -224,6 +235,13 @@ async function handleLogin() {
   padding: 2px 6px;
   border-radius: 4px;
   color: #4f46e5;
+}
+
+.login-footer {
+  position: relative;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.75) !important;
+  padding-bottom: 20px;
 }
 
 @media (max-width: 900px) {

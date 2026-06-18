@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => !!token.value)
   const isTeacher = computed(() => user.value?.role === 'teacher')
+  const isAdmin = computed(() => user.value?.role === 'admin')
   const isStudent = computed(() => user.value?.role === 'student')
 
   async function login(username, password) {
@@ -26,5 +27,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('user')
   }
 
-  return { token, user, isLoggedIn, isTeacher, isStudent, login, logout }
+  return { token, user, isLoggedIn, isTeacher, isAdmin, isStudent, login, logout }
 })

@@ -19,6 +19,7 @@ from .database import Base
 
 
 class UserRole(str, enum.Enum):
+    admin = "admin"
     teacher = "teacher"
     student = "student"
 
@@ -47,6 +48,12 @@ class SessionStatus(str, enum.Enum):
     submitted = "submitted"
 
 
+class TypingClassSessionStatus(str, enum.Enum):
+    pending = "pending"
+    active = "active"
+    ended = "ended"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -56,6 +63,7 @@ class User(Base):
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.student)
     class_name = Column(String(100), default="")
+    assigned_classes = Column(JSON, default=list)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen_at = Column(DateTime, nullable=True)
@@ -153,7 +161,8 @@ class TypingRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     text_id = Column(Integer, ForeignKey("typing_texts.id"), nullable=True)
-    source = Column(String(20), default="practice")  # practice / exam
+    typing_session_id = Column(Integer, ForeignKey("typing_class_sessions.id"), nullable=True)
+    source = Column(String(20), default="practice")  # practice / test / class_test / exam
     reference_text = Column(Text, nullable=False)
     typed_text = Column(Text, default="")
     duration_seconds = Column(Float, default=0)
@@ -166,3 +175,24 @@ class TypingRecord(Base):
 
     student = relationship("User")
     text = relationship("TypingText")
+    typing_session = relationship("TypingClassSession", back_populates="records")
+
+
+class TypingClassSession(Base):
+    """教师发起的班级打字测试（如5分钟测试）"""
+    __tablename__ = "typing_class_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    text_id = Column(Integer, ForeignKey("typing_texts.id"), nullable=False)
+    class_name = Column(String(100), nullable=False)
+    title = Column(String(200), default="")
+    status = Column(Enum(TypingClassSessionStatus), default=TypingClassSessionStatus.pending)
+    duration_seconds = Column(Integer, default=300)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    teacher = relationship("User", foreign_keys=[teacher_id])
+    text = relationship("TypingText")
+    records = relationship("TypingRecord", back_populates="typing_session")

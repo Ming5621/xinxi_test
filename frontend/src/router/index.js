@@ -1,5 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+function homePath(role) {
+  if (role === 'admin') return '/admin'
+  if (role === 'teacher') return '/teacher'
+  return '/student'
+}
+
 const routes = [
   {
     path: '/login',
@@ -10,7 +16,7 @@ const routes = [
   {
     path: '/student',
     component: () => import('@/layouts/StudentLayout.vue'),
-    meta: { requiresAuth: true, role: 'student' },
+    meta: { requiresAuth: true, roles: ['student'] },
     children: [
       { path: '', name: 'StudentHome', component: () => import('@/views/student/Dashboard.vue') },
       { path: 'exam/:id', name: 'TakeExam', component: () => import('@/views/student/ExamTake.vue') },
@@ -22,7 +28,7 @@ const routes = [
   {
     path: '/teacher',
     component: () => import('@/layouts/TeacherLayout.vue'),
-    meta: { requiresAuth: true, role: 'teacher' },
+    meta: { requiresAuth: true, roles: ['teacher', 'admin'] },
     children: [
       { path: '', name: 'TeacherHome', component: () => import('@/views/teacher/Dashboard.vue') },
       { path: 'students', name: 'Students', component: () => import('@/views/teacher/Students.vue') },
@@ -32,6 +38,15 @@ const routes = [
       { path: 'exams/:id/stats', name: 'ExamStats', component: () => import('@/views/teacher/ExamStats.vue') },
       { path: 'exams/:id/results', name: 'ExamResults', component: () => import('@/views/teacher/ExamResults.vue') },
       { path: 'typing', name: 'TypingStats', component: () => import('@/views/teacher/TypingStats.vue') },
+      { path: 'typing/class-test', name: 'TypingClassTest', component: () => import('@/views/teacher/TypingClassTest.vue') },
+    ],
+  },
+  {
+    path: '/admin',
+    component: () => import('@/layouts/AdminLayout.vue'),
+    meta: { requiresAuth: true, roles: ['admin'] },
+    children: [
+      { path: '', name: 'AdminHome', component: () => import('@/views/admin/Teachers.vue') },
     ],
   },
   {
@@ -50,13 +65,13 @@ router.beforeEach((to, from, next) => {
   const user = JSON.parse(localStorage.getItem('user') || 'null')
 
   if (to.meta.guest && token) {
-    return next(user?.role === 'teacher' ? '/teacher' : '/student')
+    return next(homePath(user?.role))
   }
   if (to.meta.requiresAuth && !token) {
     return next('/login')
   }
-  if (to.meta.role && user?.role !== to.meta.role) {
-    return next(user?.role === 'teacher' ? '/teacher' : '/student')
+  if (to.meta.roles && user && !to.meta.roles.includes(user.role)) {
+    return next(homePath(user.role))
   }
   next()
 })

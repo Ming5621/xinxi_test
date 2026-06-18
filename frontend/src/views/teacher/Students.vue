@@ -7,12 +7,18 @@
 
     <div class="content-card">
       <div class="toolbar">
-        <el-input v-model="search" placeholder="搜索学生姓名或用户名" style="width: 300px" clearable :prefix-icon="Search" />
+        <div class="toolbar-left">
+          <el-input v-model="search" placeholder="搜索学生姓名或用户名" style="width: 260px" clearable :prefix-icon="Search" />
+          <ClassFilter v-model="classFilter" @update:model-value="loadStudents" />
+        </div>
         <div class="toolbar-right">
           <span class="online-summary">
             <span class="online-dot"></span>
             在线 {{ onlineCount }} / {{ students.length }}
           </span>
+          <el-button @click="handleExport">
+            <el-icon><Download /></el-icon> 导出 Excel
+          </el-button>
           <el-button @click="importVisible = true">
             <el-icon><Upload /></el-icon> 批量导入
           </el-button>
@@ -62,7 +68,9 @@
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="班级" prop="class_name">
-          <el-input v-model="form.class_name" />
+          <el-select v-model="form.class_name" placeholder="选择班级" style="width: 100%" filterable allow-create>
+            <el-option v-for="c in availableClasses" :key="c" :label="c" :value="c" />
+          </el-select>
         </el-form-item>
         <el-form-item label="密码" :prop="editing ? '' : 'password'">
           <el-input v-model="form.password" type="password" :placeholder="editing ? '留空则不修改' : '请输入密码'" show-password />
@@ -98,10 +106,11 @@ student08,王五,微机2班,123456"
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { presenceApi, userApi, importApi } from '@/api'
+import { presenceApi, userApi, importApi, exportApi, classApi } from '@/api'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
+import ClassFilter from '@/components/ClassFilter.vue'
 
 const studentTemplate = `用户名,姓名,班级,密码
 student06,张三,微机1班,123456
@@ -111,6 +120,8 @@ student08,王五,微机2班,123456`
 const loading = ref(true)
 const saving = ref(false)
 const students = ref([])
+const availableClasses = ref([])
+const classFilter = ref('')
 const search = ref('')
 const dialogVisible = ref(false)
 const importVisible = ref(false)
@@ -177,7 +188,12 @@ async function handleDelete(row) {
 }
 
 async function loadStudents() {
-  students.value = await presenceApi.students()
+  students.value = await presenceApi.students(classFilter.value)
+}
+
+async function handleExport() {
+  await exportApi.students(classFilter.value)
+  ElMessage.success('导出成功')
 }
 
 async function handleBatchImport({ text, file, defaultPassword }) {
@@ -188,6 +204,8 @@ async function handleBatchImport({ text, file, defaultPassword }) {
 }
 
 onMounted(async () => {
+  const res = await classApi.list()
+  availableClasses.value = res.classes || []
   await loadStudents()
   loading.value = false
   refreshTimer = setInterval(loadStudents, 10000)
@@ -205,6 +223,12 @@ onUnmounted(() => {
   align-items: center;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .toolbar-right {
