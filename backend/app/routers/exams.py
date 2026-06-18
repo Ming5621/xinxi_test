@@ -15,6 +15,7 @@ from ..models import (
     SessionStatus,
     User,
 )
+from ..permissions import ensure_class_access, filter_class_name, get_assigned_classes
 from ..typing_utils import compare_text, calculate_wpm, parse_typing_config, score_typing_question, get_typing_level
 from ..schemas import (
     ExamCreate,
@@ -479,14 +480,23 @@ def get_session_detail(
 @router.get("/{exam_id}/sessions", response_model=list[SessionOut])
 def list_exam_sessions(
     exam_id: int,
+    class_name: str | None = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
+    class_name = filter_class_name(current_user, class_name)
     sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    classes = get_assigned_classes(current_user)
     result = []
     for s in sessions:
         student = s.student
+        if not student:
+            continue
+        if classes is not None and student.class_name not in classes:
+            continue
+        if class_name and student.class_name != class_name:
+            continue
         result.append(
             SessionOut(
                 id=s.id,

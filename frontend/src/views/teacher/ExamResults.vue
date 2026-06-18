@@ -2,7 +2,13 @@
   <div class="page-container">
     <div class="page-header">
       <el-button text @click="$router.back()"><el-icon><ArrowLeft /></el-icon> 返回</el-button>
-      <h1>考试成绩</h1>
+      <div class="header-row">
+        <h1>考试成绩</h1>
+        <div class="header-actions">
+          <ClassFilter v-model="classFilter" @update:model-value="loadSessions" />
+          <el-button @click="handleExport"><el-icon><Download /></el-icon> 导出 Excel</el-button>
+        </div>
+      </div>
     </div>
 
     <div class="content-card" v-loading="loading">
@@ -75,11 +81,14 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { examApi } from '@/api'
+import { ElMessage } from 'element-plus'
+import { examApi, exportApi } from '@/api'
+import ClassFilter from '@/components/ClassFilter.vue'
 
 const route = useRoute()
 const loading = ref(true)
 const sessions = ref([])
+const classFilter = ref('')
 const detailVisible = ref(false)
 const detail = ref(null)
 
@@ -96,13 +105,38 @@ async function showDetail(row) {
   detailVisible.value = true
 }
 
-onMounted(async () => {
-  sessions.value = await examApi.examSessions(Number(route.params.id))
-  loading.value = false
-})
+async function loadSessions() {
+  loading.value = true
+  try {
+    sessions.value = await examApi.examSessions(Number(route.params.id), classFilter.value)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleExport() {
+  await exportApi.examResults(Number(route.params.id), classFilter.value)
+  ElMessage.success('导出成功')
+}
+
+onMounted(loadSessions)
 </script>
 
 <style scoped>
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .score {
   font-weight: 600;
   color: #4f46e5;

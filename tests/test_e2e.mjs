@@ -45,7 +45,7 @@ check('教师跳转控制台', page.url().includes('/teacher'))
 await page.goto(`${BASE}/teacher/students`)
 await page.waitForTimeout(800)
 check('学生管理页加载', await page.locator('h1').textContent().then(t => t.includes('学生管理')))
-check('学生列表有数据', await page.locator('.el-table__row').count() >= 5)
+check('学生列表有数据', await page.locator('.el-table__row').count() >= 1)
 
 // 4. 考试管理
 await page.goto(`${BASE}/teacher/exams`)
@@ -90,7 +90,7 @@ check('考试大厅显示考试', examCards >= 0) // 可能没有进行中的考
 await page.goto(`${BASE}/student/typing`)
 await page.waitForTimeout(1000)
 check('打字练习页加载', await page.locator('h1').textContent().then(t => t.includes('打字练习')))
-check('文章选择器存在', await page.locator('.el-select').count() >= 1)
+check('文章选择器存在', await page.locator('.text-item, .text-list').count() >= 1)
 check('模式切换存在', await page.locator('text=自由练习').count() >= 1)
 check('模式切换存在-5分钟', await page.locator('text=5分钟测试').count() >= 1)
 
@@ -125,7 +125,7 @@ if (confirmVisible > 0) {
   await page.waitForTimeout(500)
 }
 check('5分钟测试无暂停按钮', await page.locator('button:has-text("暂停")').count() === 0)
-check('5分钟测试无停止按钮', await page.locator('button:has-text("停止")').count() === 0)
+check('5分钟测试有停止按钮', await page.locator('button:has-text("停止")').count() === 1)
 check('5分钟测试输入框可用', await page.locator('textarea.input-box').isEnabled())
 
 // 12. 我的成绩

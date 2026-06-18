@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from .models import ExamStatus, QuestionType, SessionStatus, TypingDifficulty, UserRole
+from .models import ExamStatus, QuestionType, SessionStatus, TypingClassSessionStatus, TypingDifficulty, UserRole
 
 
 # Auth
@@ -24,6 +24,7 @@ class UserBase(BaseModel):
     name: str
     role: UserRole = UserRole.student
     class_name: str = ""
+    assigned_classes: list[str] = Field(default_factory=list)
 
 
 class UserCreate(UserBase):
@@ -33,6 +34,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     class_name: Optional[str] = None
+    assigned_classes: Optional[list[str]] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -185,6 +187,16 @@ class ExamStatistics(BaseModel):
     total_possible_score: float
     question_stats: list[QuestionStat]
     score_distribution: dict[str, int]
+    class_stats: list["ClassExamStat"] = []
+
+
+class ClassExamStat(BaseModel):
+    class_name: str
+    student_count: int
+    submitted_count: int
+    average_score: float
+    pass_count: int
+    pass_rate: float
 
 
 class DashboardStats(BaseModel):
@@ -255,6 +267,7 @@ class TypingTextCreate(BaseModel):
 
 class TypingSubmitRequest(BaseModel):
     text_id: Optional[int] = None
+    typing_session_id: Optional[int] = None
     reference_text: str
     typed_text: str
     duration_seconds: float
@@ -297,3 +310,33 @@ class TypingStandardsOut(BaseModel):
     levels: list[dict]
     min_accuracy: float
     description: str
+
+
+class TypingClassSessionCreate(BaseModel):
+    text_id: int
+    class_name: str
+    title: str = ""
+    duration_seconds: int = 300
+
+
+class TypingClassSessionOut(BaseModel):
+    id: int
+    teacher_id: int
+    teacher_name: str = ""
+    text_id: int
+    text_title: str = ""
+    class_name: str
+    title: str
+    status: TypingClassSessionStatus
+    duration_seconds: int
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    created_at: datetime
+    participant_count: int = 0
+    submitted_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class TypingClassSessionDetail(TypingClassSessionOut):
+    records: list[TypingRecordOut] = []

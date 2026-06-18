@@ -3,6 +3,7 @@
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 BASE = "http://localhost:8000/api"
@@ -50,6 +51,17 @@ def login(username, password):
 
 
 print("=" * 50)
+
+# 清理上次测试残留
+_teacher_token, _ = login("teacher", "teacher123")
+if _teacher_token:
+    for username in ["test_student_99", "test_import01", "test_import02", "test_cross_class"]:
+        code, users = req("GET", "/users?role=student", token=_teacher_token)
+        if code == 200:
+            for u in users:
+                if u["username"] == username:
+                    req("DELETE", f"/users/{u['id']}", token=_teacher_token)
+
 print("考试系统 API 测试")
 print("=" * 50)
 
@@ -68,14 +80,14 @@ check("错误密码拒绝", code == 401)
 
 # 3. 用户管理
 code, users = req("GET", "/users?role=student", token=teacher_token)
-check("获取学生列表", code == 200 and len(users) >= 5, f"code={code}")
+check("获取学生列表", code == 200 and len(users) >= 1, f"code={code}, count={len(users) if code==200 else 0}")
 
 code, new_user = req("POST", "/users", {
     "username": "test_student_99",
     "name": "测试学生",
     "password": "123456",
     "role": "student",
-    "class_name": "测试班",
+    "class_name": "微机1班",
 }, token=teacher_token)
 check("创建学生", code == 200 and new_user.get("username") == "test_student_99")
 
@@ -87,12 +99,33 @@ code, _ = req("POST", "/users", {
 }, token=teacher_token)
 check("重复用户名拒绝", code == 400)
 
+admin_token, admin = login("admin", "admin123")
+check("管理员登录", admin_token and admin["role"] == "admin")
+
+code, teachers = req("GET", "/users?role=teacher", token=admin_token)
+check("管理员查看教师列表", code == 200 and len(teachers) >= 1)
+
+code, classes = req("GET", "/classes", token=teacher_token)
+check("教师获取班级列表", code == 200 and "classes" in classes)
+
+code, _ = req("POST", "/users", {
+    "username": "test_cross_class",
+    "name": "跨班学生",
+    "password": "123456",
+    "role": "student",
+    "class_name": "微机2班",
+}, token=teacher_token)
+check("教师无法创建其他班级学生", code == 403)
+
+code, _ = req("GET", "/users?role=teacher", token=teacher_token)
+check("教师无法查看教师列表", code == 403)
+
 # 4. 批量导入
 code, result = req("POST", "/import/students", {
     "text": "test_import01,导入一,微机1班,123456\ntest_import02,导入二,微机2班,",
     "default_password": "123456",
 }, token=teacher_token)
-check("批量导入学生", code == 200 and result.get("success_count", 0) >= 2, str(result))
+check("批量导入学生", code == 200 and result.get("success_count", 0) >= 1, str(result))
 
 code, parsed = req("POST", "/import/questions/parse", {
     "text": "类型,题目,选项A,选项B,选项C,选项D,答案,分值\nchoice,测试题,A,B,C,D,A,5",
@@ -207,6 +240,53 @@ check("查看打字记录", code == 200)
 code, class_stats = req("GET", "/typing/records/stats", token=teacher_token)
 check("教师打字统计", code == 200)
 
+code, class_stats_filtered = req(
+    "GET",
+    f"/typing/records/stats?{urllib.parse.urlencode({'class_name': '微机1班'})}",
+    token=teacher_token,
+)
+check("按班级打字统计", code == 200)
+
+# 课堂打字测试
+if texts:
+    code, typing_session = req("POST", "/typing/sessions", {
+        "text_id": texts[0]["id"],
+        "class_name": "微机1班",
+        "title": "自动化课堂测试",
+        "duration_seconds": 300,
+    }, token=teacher_token)
+    check("创建课堂打字测试", code == 200 and typing_session.get("status") == "pending")
+    session_id = typing_session.get("id") if code == 200 else None
+    if session_id:
+        code, _ = req("POST", f"/typing/sessions/{session_id}/start", token=teacher_token)
+        check("开始课堂打字测试", code == 200)
+        code, active = req("GET", "/typing/sessions/active", token=student_token)
+        check("学生获取进行中的课堂测试", code == 200 and active and active.get("id") == session_id)
+        code, class_submit = req("POST", "/typing/submit", {
+            "text_id": texts[0]["id"],
+            "reference_text": texts[0]["content"],
+            "typed_text": texts[0]["content"][:30],
+            "duration_seconds": 60,
+            "typing_session_id": session_id,
+        }, token=student_token)
+        check("学生提交课堂打字测试", code == 200 and float(class_submit.get("score") or 0) > 0)
+        code, detail = req("GET", f"/typing/sessions/{session_id}", token=teacher_token)
+        check("教师查看课堂测试成绩", code == 200 and len(detail.get("records", [])) >= 1)
+        req("POST", f"/typing/sessions/{session_id}/end", token=teacher_token)
+
+# 10b. Excel 导出
+import urllib.request
+export_req = urllib.request.Request(
+    f"{BASE}/export/students",
+    headers={"Authorization": f"Bearer {teacher_token}"},
+)
+try:
+    with urllib.request.urlopen(export_req, timeout=10) as resp:
+        export_ok = resp.status == 200 and "spreadsheet" in resp.headers.get("Content-Type", "")
+except Exception:
+    export_ok = False
+check("导出学生 Excel", export_ok)
+
 # 10. 在线状态
 code, hb = req("POST", "/presence/heartbeat", token=student_token)
 check("学生心跳", code == 200 and hb.get("ok") is True)
@@ -237,7 +317,7 @@ code, _ = req("GET", "/exams")
 check("未登录拒绝", code == 401)
 
 # 清理测试用户
-for username in ["test_student_99", "test_import01", "test_import02"]:
+for username in ["test_student_99", "test_import01", "test_import02", "test_cross_class"]:
     code, users = req("GET", "/users?role=student", token=teacher_token)
     if code == 200:
         for u in users:

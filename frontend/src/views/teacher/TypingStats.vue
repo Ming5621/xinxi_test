@@ -6,6 +6,14 @@
     </div>
 
     <div class="content-card" v-loading="loading">
+      <div class="toolbar">
+        <ClassFilter v-model="classFilter" @update:model-value="loadStats" />
+        <div class="toolbar-right">
+          <el-button @click="$router.push('/teacher/typing/class-test')">课堂打字测试</el-button>
+          <el-button @click="handleExport"><el-icon><Download /></el-icon> 导出 Excel</el-button>
+        </div>
+      </div>
+
       <el-table :data="stats" stripe>
         <el-table-column prop="student_name" label="姓名" width="100" />
         <el-table-column prop="class_name" label="班级" width="120" />
@@ -85,10 +93,13 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { typingApi } from '@/api'
+import { ElMessage } from 'element-plus'
+import { typingApi, exportApi } from '@/api'
+import ClassFilter from '@/components/ClassFilter.vue'
 
 const loading = ref(true)
 const stats = ref([])
+const classFilter = ref('')
 const levels = ref([])
 const dialogVisible = ref(false)
 const recordsLoading = ref(false)
@@ -124,15 +135,41 @@ async function showRecords(row) {
   }
 }
 
+async function loadStats() {
+  loading.value = true
+  try {
+    stats.value = await typingApi.classStats(classFilter.value)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleExport() {
+  await exportApi.typingRecords(classFilter.value)
+  ElMessage.success('导出成功')
+}
+
 onMounted(async () => {
-  const [s, std] = await Promise.all([typingApi.classStats(), typingApi.standards()])
-  stats.value = s
+  const std = await typingApi.standards()
   levels.value = std.levels
+  await loadStats()
   loading.value = false
 })
 </script>
 
 <style scoped>
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 12px;
+}
+
 .muted { color: #9ca3af; }
 
 .standards-card { margin-top: 20px; }

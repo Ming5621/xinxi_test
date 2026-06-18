@@ -29,6 +29,7 @@
 
     <main class="main">
       <router-view />
+      <CopyrightFooter />
     </main>
   </div>
 </template>
@@ -38,6 +39,7 @@ import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useHeartbeat } from '@/composables/useHeartbeat'
+import CopyrightFooter from '@/components/CopyrightFooter.vue'
 
 const router = useRouter()
 const auth = useAuthStore()

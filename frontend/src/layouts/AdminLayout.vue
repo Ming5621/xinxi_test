@@ -1,63 +1,47 @@
 <template>
-  <el-container class="teacher-layout">
+  <el-container class="admin-layout">
     <el-aside width="240px" class="sidebar">
       <div class="sidebar-brand">
-        <el-icon :size="28" color="white"><Reading /></el-icon>
+        <el-icon :size="28" color="white"><Setting /></el-icon>
         <div>
-          <div class="brand-title">考试管理系统</div>
-          <div class="brand-sub">教师端</div>
+          <div class="brand-title">系统管理</div>
+          <div class="brand-sub">管理员端</div>
         </div>
       </div>
 
       <el-menu
         :default-active="activeMenu"
         router
-        background-color="#1e1b4b"
-        text-color="#c7d2fe"
+        background-color="#0f172a"
+        text-color="#cbd5e1"
         active-text-color="#ffffff"
       >
-        <el-menu-item index="/teacher">
-          <el-icon><DataBoard /></el-icon>
-          <span>控制台</span>
-        </el-menu-item>
-        <el-menu-item index="/teacher/students">
-          <el-icon><User /></el-icon>
-          <span>学生管理</span>
-        </el-menu-item>
-        <el-menu-item index="/teacher/exams">
-          <el-icon><Document /></el-icon>
-          <span>考试管理</span>
-        </el-menu-item>
-        <el-menu-item index="/teacher/typing">
-          <el-icon><EditPen /></el-icon>
-          <span>打字统计</span>
-        </el-menu-item>
-        <el-menu-item index="/teacher/typing/class-test">
-          <el-icon><Timer /></el-icon>
-          <span>课堂打字测试</span>
+        <el-menu-item index="/admin">
+          <el-icon><UserFilled /></el-icon>
+          <span>教师管理</span>
         </el-menu-item>
       </el-menu>
 
       <div class="sidebar-footer">
         <div class="user-info">
-          <el-avatar :size="36" style="background: #4f46e5">{{ auth.user?.name?.[0] }}</el-avatar>
+          <el-avatar :size="36" style="background: #0ea5e9">{{ auth.user?.name?.[0] }}</el-avatar>
           <div>
             <div class="user-name">{{ auth.user?.name }}</div>
-            <div class="user-role">教师</div>
+            <div class="user-role">管理员</div>
           </div>
         </div>
-        <el-button text style="color: #c7d2fe" @click="handleLogout">
+        <el-button text style="color: #cbd5e1" @click="handleLogout">
           <el-icon><SwitchButton /></el-icon> 退出登录
         </el-button>
-        <CopyrightFooter light />
+        <CopyrightFooter />
       </div>
     </el-aside>
 
     <el-container>
       <el-header class="top-header">
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/teacher' }">首页</el-breadcrumb-item>
-          <el-breadcrumb-item v-if="breadcrumb">{{ breadcrumb }}</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ path: '/admin' }">管理后台</el-breadcrumb-item>
+          <el-breadcrumb-item>教师账户</el-breadcrumb-item>
         </el-breadcrumb>
       </el-header>
       <el-main class="main-content">
@@ -78,26 +62,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const activeMenu = computed(() => {
-  const path = route.path
-  if (path.startsWith('/teacher/exams')) return '/teacher/exams'
-  if (path.startsWith('/teacher/students')) return '/teacher/students'
-  if (path.startsWith('/teacher/typing')) return path.includes('class-test') ? '/teacher/typing/class-test' : '/teacher/typing'
-  return '/teacher'
-})
-
-const breadcrumbMap = {
-  Students: '学生管理',
-  Exams: '考试管理',
-  ExamCreate: '创建考试',
-  ExamEdit: '编辑考试',
-  ExamStats: '考试统计',
-  ExamResults: '考试成绩',
-  TypingStats: '打字统计',
-  TypingClassTest: '课堂打字测试',
-}
-
-const breadcrumb = computed(() => breadcrumbMap[route.name] || '')
+const activeMenu = computed(() => route.path)
 
 async function handleLogout() {
   await ElMessageBox.confirm('确定要退出登录吗？', '提示', { type: 'warning' })
@@ -107,12 +72,12 @@ async function handleLogout() {
 </script>
 
 <style scoped>
-.teacher-layout {
+.admin-layout {
   min-height: 100vh;
 }
 
 .sidebar {
-  background: #1e1b4b;
+  background: #0f172a;
   display: flex;
   flex-direction: column;
 }
@@ -132,7 +97,7 @@ async function handleLogout() {
 }
 
 .brand-sub {
-  color: #a5b4fc;
+  color: #94a3b8;
   font-size: 12px;
 }
 
@@ -160,7 +125,7 @@ async function handleLogout() {
 }
 
 .user-role {
-  color: #a5b4fc;
+  color: #94a3b8;
   font-size: 12px;
 }
 

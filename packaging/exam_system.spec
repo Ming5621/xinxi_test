@@ -66,7 +66,13 @@ hiddenimports = [
     "app.routers.exams",
     "app.routers.stats",
     "app.routers.typing",
-    "app.routers.import_data",
+    "app.permissions",
+    "app.routers.classes",
+    "app.routers.export_data",
+    "openpyxl",
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.messagebox",
 ]
 
 a = Analysis(
@@ -78,7 +84,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "numpy", "pandas", "scipy", "PIL"],
+    excludes=["matplotlib", "numpy", "pandas", "scipy", "PIL"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -97,7 +103,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

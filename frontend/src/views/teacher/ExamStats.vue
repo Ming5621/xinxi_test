@@ -2,7 +2,13 @@
   <div class="page-container" v-loading="loading">
     <div class="page-header">
       <el-button text @click="$router.back()"><el-icon><ArrowLeft /></el-icon> 返回</el-button>
-      <h1>考试统计 - {{ stats?.exam_title }}</h1>
+      <div class="header-row">
+        <h1>考试统计 - {{ stats?.exam_title }}</h1>
+        <div class="header-actions">
+          <ClassFilter v-model="classFilter" @update:model-value="loadStats" />
+          <el-button @click="handleExport"><el-icon><Download /></el-icon> 导出 Excel</el-button>
+        </div>
+      </div>
     </div>
 
     <template v-if="stats">
@@ -55,6 +61,20 @@
         </el-col>
       </el-row>
 
+      <div class="content-card" style="margin-top: 20px" v-if="stats.class_stats?.length">
+        <h3 style="margin-bottom: 16px">各班级成绩分析</h3>
+        <el-table :data="stats.class_stats" stripe>
+          <el-table-column prop="class_name" label="班级" width="140" />
+          <el-table-column prop="student_count" label="参考人数" width="100" />
+          <el-table-column prop="submitted_count" label="已提交" width="100" />
+          <el-table-column prop="average_score" label="平均分" width="100" />
+          <el-table-column prop="pass_count" label="及格人数" width="100" />
+          <el-table-column label="及格率" width="120">
+            <template #default="{ row }">{{ row.pass_rate }}%</template>
+          </el-table-column>
+        </el-table>
+      </div>
+
       <div class="content-card" style="margin-top: 20px">
         <h3 style="margin-bottom: 16px">各题正确率</h3>
         <el-table :data="stats.question_stats" stripe>
@@ -89,11 +109,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { statsApi } from '@/api'
+import { ElMessage } from 'element-plus'
+import { statsApi, exportApi } from '@/api'
+import ClassFilter from '@/components/ClassFilter.vue'
 
 const route = useRoute()
 const loading = ref(true)
 const stats = ref(null)
+const classFilter = ref('')
 
 const overviewCards = computed(() => {
   if (!stats.value) return []
@@ -110,13 +133,38 @@ function barWidth(count) {
   return (count / max) * 100
 }
 
-onMounted(async () => {
-  stats.value = await statsApi.exam(Number(route.params.id))
-  loading.value = false
-})
+async function loadStats() {
+  loading.value = true
+  try {
+    stats.value = await statsApi.exam(Number(route.params.id), classFilter.value)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleExport() {
+  await exportApi.examResults(Number(route.params.id), classFilter.value, stats.value?.exam_title)
+  ElMessage.success('导出成功')
+}
+
+onMounted(loadStats)
 </script>
 
 <style scoped>
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .distribution {
   display: flex;
   flex-direction: column;

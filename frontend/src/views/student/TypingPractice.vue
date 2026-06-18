@@ -5,10 +5,30 @@
       <p>左侧选择文章和模式，右侧开始练习</p>
     </div>
 
+    <el-alert
+      v-if="classSession && !inClassTest"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="class-test-alert"
+      :title="`课堂打字测试进行中：${classSession.title}`"
+    >
+      <template #default>
+        <p>教师 {{ classSession.teacher_name }} 发起了 5 分钟打字测试，文章：{{ classSession.text_title }}</p>
+        <el-button type="primary" size="small" style="margin-top: 8px" @click="joinClassTest">立即参加</el-button>
+      </template>
+    </el-alert>
+
     <div class="typing-layout">
       <!-- 左侧：选项目 -->
-      <aside class="sidebar content-card">
-        <section class="sidebar-section">
+      <aside class="sidebar content-card" :class="{ locked: inClassTest }">
+        <section v-if="inClassTest" class="sidebar-section class-test-info">
+          <h3>课堂测试</h3>
+          <p>{{ classSession?.title }}</p>
+          <el-tag type="warning" size="small">5 分钟 · 不可停止</el-tag>
+        </section>
+
+        <section class="sidebar-section" v-if="!inClassTest">
           <h3>选择文章</h3>
           <div class="text-list" v-loading="loading">
             <button
@@ -27,7 +47,7 @@
           </div>
         </section>
 
-        <section class="sidebar-section">
+        <section class="sidebar-section" v-if="!inClassTest">
           <h3>练习模式</h3>
           <el-radio-group
             v-model="practiceMode"
@@ -39,7 +59,7 @@
             <el-radio-button value="test">5分钟测试</el-radio-button>
           </el-radio-group>
           <p class="mode-hint" v-if="practiceMode === 'free'">可随时暂停和停止</p>
-          <p class="mode-hint warn" v-else>开始后无法暂停或停止</p>
+          <p class="mode-hint" v-else>可随时停止并提交当前成绩</p>
         </section>
       </aside>
 
@@ -59,10 +79,11 @@
         </div>
         <TypingTest
           ref="typingRef"
-          :key="`${selected.id}-${practiceMode}-${sessionKey}`"
+          :key="`${selected.id}-${practiceMode}-${sessionKey}-${inClassTest}`"
           :reference-text="selected.content"
           :mode="practiceMode"
           :time-limit="300"
+          :allow-stop="!inClassTest"
           expanded
           @started="typingActive = true; lastResult = null"
           @finished="typingActive = false"
@@ -80,7 +101,7 @@
       <el-table :data="history" stripe size="small" v-loading="historyLoading" empty-text="暂无练习记录">
         <el-table-column prop="text_title" label="文章" min-width="160" />
         <el-table-column label="模式" width="100">
-          <template #default="{ row }">{{ row.source === 'test' ? '5分钟测试' : '自由练习' }}</template>
+          <template #default="{ row }">{{ modeLabel(row.source) }}</template>
         </el-table-column>
         <el-table-column label="评分" width="80">
           <template #default="{ row }"><strong>{{ row.score }}</strong> 分</template>
@@ -105,7 +126,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { typingApi } from '@/api'
 import TypingTest from '@/components/TypingTest.vue'
@@ -116,6 +137,8 @@ const selectedId = ref(null)
 const practiceMode = ref('free')
 const sessionKey = ref(0)
 const typingRef = ref()
+const classSession = ref(null)
+const inClassTest = ref(false)
 
 const selected = computed(() => texts.value.find((t) => t.id === selectedId.value))
 const typingActive = ref(false)
@@ -163,28 +186,82 @@ function onModeChange() {
   sessionKey.value++
 }
 
+function modeLabel(source) {
+  if (source === 'class_test') return '课堂测试'
+  if (source === 'test') return '5分钟测试'
+  return '自由练习'
+}
+
+async function checkClassSession() {
+  classSession.value = await typingApi.activeSession()
+  if (!classSession.value && inClassTest.value) {
+    inClassTest.value = false
+    practiceMode.value = 'free'
+  }
+}
+
+function joinClassTest() {
+  if (!classSession.value) return
+  inClassTest.value = true
+  selectedId.value = classSession.value.text_id
+  practiceMode.value = 'test'
+  sessionKey.value++
+  lastResult.value = null
+}
+
+let sessionPollTimer = null
+
 async function handleComplete(data) {
   typingActive.value = false
-  const result = await typingApi.submit({
+  const payload = {
     text_id: selected.value.id,
     reference_text: selected.value.content,
     typed_text: data.typed_text,
     duration_seconds: data.duration_seconds,
     source: data.mode === 'test' ? 'test' : 'practice',
-  })
+  }
+  if (inClassTest.value && classSession.value) {
+    payload.typing_session_id = classSession.value.id
+  }
+  const result = await typingApi.submit(payload)
   lastResult.value = result
-  const modeLabel = data.mode === 'test' ? '5分钟测试' : '自由练习'
-  ElMessage.success(`${modeLabel}完成：${result.level}，评分 ${result.score} 分`)
+  const modeLabelText = inClassTest.value ? '课堂测试' : (data.mode === 'test' ? '5分钟测试' : '自由练习')
+  ElMessage.success(`${modeLabelText}完成：${result.level}，评分 ${result.score} 分`)
+  if (inClassTest.value) {
+    inClassTest.value = false
+    practiceMode.value = 'free'
+    await checkClassSession()
+  }
   await loadHistory()
 }
 
 onMounted(async () => {
   await loadTexts()
   await loadHistory()
+  await checkClassSession()
+  sessionPollTimer = setInterval(checkClassSession, 8000)
+})
+
+onUnmounted(() => {
+  if (sessionPollTimer) clearInterval(sessionPollTimer)
 })
 </script>
 
 <style scoped>
+.class-test-alert {
+  margin-bottom: 16px;
+}
+
+.class-test-info p {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.sidebar.locked .text-item:not(.active) {
+  display: none;
+}
+
 .typing-page {
   max-width: none;
   margin: 0;

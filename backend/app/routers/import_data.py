@@ -5,6 +5,7 @@ from ..auth import get_password_hash, require_teacher
 from ..database import get_db
 from ..import_utils import parse_questions_text, parse_students_text
 from ..models import QuestionType, User, UserRole
+from ..permissions import ensure_class_access
 from ..schemas import BatchImportRequest, BatchImportResult, QuestionCreate, QuestionParseResult
 
 router = APIRouter(prefix="/api/import", tags=["批量导入"])
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/api/import", tags=["批量导入"])
 def batch_import_students(
     data: BatchImportRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
     students, parse_errors = parse_students_text(data.text, data.default_password)
     if not students and parse_errors:
@@ -28,6 +29,13 @@ def batch_import_students(
         if existing:
             errors.append(f"用户名 {item['username']} 已存在，已跳过")
             continue
+        class_name = item.get("class_name", "")
+        if class_name:
+            try:
+                ensure_class_access(current_user, class_name)
+            except HTTPException:
+                errors.append(f"用户名 {item['username']} 班级 {class_name} 无权限，已跳过")
+                continue
         user = User(
             username=item["username"],
             password_hash=get_password_hash(item["password"]),
@@ -52,7 +60,7 @@ async def batch_import_students_file(
     file: UploadFile = File(...),
     default_password: str = "123456",
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
     content = await file.read()
     for encoding in ("utf-8-sig", "utf-8", "gbk", "gb2312"):
@@ -67,7 +75,7 @@ async def batch_import_students_file(
     return batch_import_students(
         BatchImportRequest(text=text, default_password=default_password),
         db=db,
-        _=_,
+        current_user=current_user,
     )
 
 
