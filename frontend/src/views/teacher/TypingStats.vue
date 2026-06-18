@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>打字练习统计</h1>
-      <p>查看学生日常打字练习情况</p>
+      <p>查看学生打字练习评分与历史记录</p>
     </div>
 
     <div class="content-card" v-loading="loading">
@@ -10,6 +10,11 @@
         <el-table-column prop="student_name" label="姓名" width="100" />
         <el-table-column prop="class_name" label="班级" width="120" />
         <el-table-column prop="practice_count" label="练习次数" width="100" />
+        <el-table-column label="平均评分" width="100">
+          <template #default="{ row }">
+            <strong>{{ row.avg_score || '—' }}</strong>
+          </template>
+        </el-table-column>
         <el-table-column label="平均速度" width="120">
           <template #default="{ row }">
             <span :style="{ color: speedColor(row.avg_wpm), fontWeight: 600 }">{{ row.avg_wpm }} 字/分</span>
@@ -28,6 +33,11 @@
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="showRecords(row)">历史记录</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
 
@@ -42,8 +52,34 @@
           </div>
         </el-col>
       </el-row>
-      <p class="std-note">准确率要求 ≥ 95%（义务教育信息科技课程标准第三学段）· 中考信息技术约 10 字/分钟</p>
+      <p class="std-note">准确率要求 ≥ 95% · 综合评分满分 100 分</p>
     </div>
+
+    <el-dialog v-model="dialogVisible" :title="`${currentStudent?.student_name || ''} 的打字记录`" width="760px">
+      <el-table :data="records" stripe v-loading="recordsLoading" max-height="420">
+        <el-table-column prop="text_title" label="文章" min-width="140" />
+        <el-table-column label="模式" width="100">
+          <template #default="{ row }">{{ row.source === 'test' ? '5分钟测试' : '自由练习' }}</template>
+        </el-table-column>
+        <el-table-column label="评分" width="80">
+          <template #default="{ row }"><strong>{{ row.score }}</strong></template>
+        </el-table-column>
+        <el-table-column label="速度" width="100">
+          <template #default="{ row }">{{ row.wpm }} 字/分</template>
+        </el-table-column>
+        <el-table-column label="准确率" width="90">
+          <template #default="{ row }">{{ row.accuracy }}%</template>
+        </el-table-column>
+        <el-table-column label="等级" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :color="levelColor(row.level)" effect="dark">{{ row.level }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -54,6 +90,10 @@ import { typingApi } from '@/api'
 const loading = ref(true)
 const stats = ref([])
 const levels = ref([])
+const dialogVisible = ref(false)
+const recordsLoading = ref(false)
+const records = ref([])
+const currentStudent = ref(null)
 
 const levelColors = {
   '卓越': '#7c3aed', '优秀': '#10b981', '良好': '#3b82f6',
@@ -67,6 +107,21 @@ function speedColor(wpm) {
   if (wpm >= 20) return '#3b82f6'
   if (wpm >= 10) return '#f59e0b'
   return '#ef4444'
+}
+
+function formatDate(value) {
+  return new Date(value).toLocaleString('zh-CN')
+}
+
+async function showRecords(row) {
+  currentStudent.value = row
+  dialogVisible.value = true
+  recordsLoading.value = true
+  try {
+    records.value = await typingApi.records(row.student_id)
+  } finally {
+    recordsLoading.value = false
+  }
 }
 
 onMounted(async () => {

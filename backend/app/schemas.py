@@ -276,6 +276,9 @@ class TypingResultOut(BaseModel):
 
 class TypingRecordOut(BaseModel):
     id: int
+    student_id: Optional[int] = None
+    student_name: str = ""
+    class_name: str = ""
     text_id: Optional[int]
     text_title: str = ""
     source: str
@@ -283,6 +286,7 @@ class TypingRecordOut(BaseModel):
     accuracy: float
     correct_chars: int
     level: str
+    score: float = 0.0
     duration_seconds: float
     created_at: datetime
 

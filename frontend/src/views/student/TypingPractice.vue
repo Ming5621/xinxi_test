@@ -45,6 +45,18 @@
 
       <!-- 右侧：参考文章 + 打字区 -->
       <section class="main-panel content-card" v-if="selected">
+        <div class="score-card" v-if="lastResult">
+          <div class="score-main">
+            <span class="score-value">{{ lastResult.score }}</span>
+            <span class="score-unit">分</span>
+          </div>
+          <div class="score-detail">
+            <el-tag effect="dark" :color="levelColor(lastResult.level)">{{ lastResult.level }}</el-tag>
+            <span>{{ lastResult.wpm }} 字/分</span>
+            <span>准确率 {{ lastResult.accuracy }}%</span>
+            <span class="score-remark">{{ lastResult.remark }}</span>
+          </div>
+        </div>
         <TypingTest
           ref="typingRef"
           :key="`${selected.id}-${practiceMode}-${sessionKey}`"
@@ -52,7 +64,7 @@
           :mode="practiceMode"
           :time-limit="300"
           expanded
-          @started="typingActive = true"
+          @started="typingActive = true; lastResult = null"
           @finished="typingActive = false"
           @complete="handleComplete"
         />
@@ -61,6 +73,33 @@
       <section class="main-panel content-card empty" v-else>
         <p>请先在左侧选择一篇文章</p>
       </section>
+    </div>
+
+    <div class="content-card history-card">
+      <h3>我的打字记录</h3>
+      <el-table :data="history" stripe size="small" v-loading="historyLoading" empty-text="暂无练习记录">
+        <el-table-column prop="text_title" label="文章" min-width="160" />
+        <el-table-column label="模式" width="100">
+          <template #default="{ row }">{{ row.source === 'test' ? '5分钟测试' : '自由练习' }}</template>
+        </el-table-column>
+        <el-table-column label="评分" width="80">
+          <template #default="{ row }"><strong>{{ row.score }}</strong> 分</template>
+        </el-table-column>
+        <el-table-column label="速度" width="100">
+          <template #default="{ row }">{{ row.wpm }} 字/分</template>
+        </el-table-column>
+        <el-table-column label="准确率" width="90">
+          <template #default="{ row }">{{ row.accuracy }}%</template>
+        </el-table-column>
+        <el-table-column label="等级" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :color="levelColor(row.level)" effect="dark">{{ row.level }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        </el-table-column>
+      </el-table>
     </div>
   </div>
 </template>
@@ -80,6 +119,30 @@ const typingRef = ref()
 
 const selected = computed(() => texts.value.find((t) => t.id === selectedId.value))
 const typingActive = ref(false)
+const lastResult = ref(null)
+const history = ref([])
+const historyLoading = ref(false)
+
+const levelColors = {
+  卓越: '#7c3aed', 优秀: '#10b981', 良好: '#3b82f6', 达标: '#f59e0b', 未达标: '#ef4444',
+}
+
+function levelColor(level) {
+  return levelColors[level] || '#6b7280'
+}
+
+function formatDate(value) {
+  return new Date(value).toLocaleString('zh-CN')
+}
+
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    history.value = await typingApi.myRecords()
+  } finally {
+    historyLoading.value = false
+  }
+}
 
 async function loadTexts() {
   loading.value = true
@@ -102,25 +165,30 @@ function onModeChange() {
 
 async function handleComplete(data) {
   typingActive.value = false
-  await typingApi.submit({
+  const result = await typingApi.submit({
     text_id: selected.value.id,
     reference_text: selected.value.content,
     typed_text: data.typed_text,
     duration_seconds: data.duration_seconds,
     source: data.mode === 'test' ? 'test' : 'practice',
   })
+  lastResult.value = result
   const modeLabel = data.mode === 'test' ? '5分钟测试' : '自由练习'
-  ElMessage.success(`${modeLabel}完成：${data.level}，${data.wpm} 字/分钟`)
+  ElMessage.success(`${modeLabel}完成：${result.level}，评分 ${result.score} 分`)
+  await loadHistory()
 }
 
-onMounted(loadTexts)
+onMounted(async () => {
+  await loadTexts()
+  await loadHistory()
+})
 </script>
 
 <style scoped>
 .typing-page {
   max-width: none;
   margin: 0;
-  height: calc(100vh - 132px);
+  min-height: calc(100vh - 132px);
   display: flex;
   flex-direction: column;
 }
@@ -240,5 +308,55 @@ onMounted(loadTexts)
   justify-content: center;
   color: #9ca3af;
   font-size: 15px;
+}
+
+.score-card {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 18px 22px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eef2ff, #ecfdf5);
+}
+
+.score-main {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.score-value {
+  font-size: 42px;
+  font-weight: 700;
+  color: #4f46e5;
+  line-height: 1;
+}
+
+.score-unit {
+  font-size: 16px;
+  color: #6b7280;
+}
+
+.score-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.score-remark {
+  color: #6b7280;
+}
+
+.history-card {
+  margin-top: 20px;
+}
+
+.history-card h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
 }
 </style>

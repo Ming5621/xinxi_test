@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..auth import get_current_user, require_student, require_teacher
 from ..database import get_db
@@ -13,6 +13,7 @@ from ..schemas import (
     TypingTextOut,
 )
 from ..typing_utils import (
+    DEFAULT_TYPING_CONFIG,
     TYPING_LEVELS,
     compare_text,
     calculate_wpm,
@@ -86,7 +87,9 @@ def submit_typing(
     comparison = compare_text(data.reference_text, data.typed_text)
     wpm = calculate_wpm(comparison["correct_chars"], data.duration_seconds)
     level_info = get_typing_level(wpm)
-    passed = wpm >= 10 and comparison["accuracy"] >= 95
+    score, passed, remark = score_typing_question(
+        wpm, comparison["accuracy"], 100, DEFAULT_TYPING_CONFIG
+    )
 
     record = TypingRecord(
         student_id=current_user.id,
@@ -99,6 +102,7 @@ def submit_typing(
         accuracy=comparison["accuracy"],
         correct_chars=comparison["correct_chars"],
         level=level_info["level"],
+        score=score,
     )
     db.add(record)
     db.commit()
@@ -112,40 +116,66 @@ def submit_typing(
         level=level_info["level"],
         level_desc=level_info["desc"],
         passed=passed,
+        score=score,
+        remark=remark,
+    )
+
+
+def _record_to_out(record: TypingRecord) -> TypingRecordOut:
+    title = record.text.title if record.text else "自定义练习"
+    score = record.score
+    if not score:
+        score, _, _ = score_typing_question(record.wpm, record.accuracy, 100, DEFAULT_TYPING_CONFIG)
+    return TypingRecordOut(
+        id=record.id,
+        student_id=record.student_id,
+        student_name=record.student.name if record.student else "",
+        class_name=record.student.class_name if record.student else "",
+        text_id=record.text_id,
+        text_title=title,
+        source=record.source,
+        wpm=record.wpm,
+        accuracy=record.accuracy,
+        correct_chars=record.correct_chars,
+        level=record.level,
+        duration_seconds=record.duration_seconds,
+        score=score,
+        created_at=record.created_at,
     )
 
 
 @router.get("/records/my", response_model=list[TypingRecordOut])
 def my_records(
-    limit: int = 20,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_student),
 ):
     records = (
         db.query(TypingRecord)
+        .options(joinedload(TypingRecord.student), joinedload(TypingRecord.text))
         .filter(TypingRecord.student_id == current_user.id)
         .order_by(TypingRecord.id.desc())
         .limit(limit)
         .all()
     )
-    result = []
-    for r in records:
-        title = r.text.title if r.text else "自定义练习"
-        result.append(
-            TypingRecordOut(
-                id=r.id,
-                text_id=r.text_id,
-                text_title=title,
-                source=r.source,
-                wpm=r.wpm,
-                accuracy=r.accuracy,
-                correct_chars=r.correct_chars,
-                level=r.level,
-                duration_seconds=r.duration_seconds,
-                created_at=r.created_at,
-            )
-        )
-    return result
+    return [_record_to_out(r) for r in records]
+
+
+@router.get("/records", response_model=list[TypingRecordOut])
+def list_records(
+    student_id: int | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_teacher),
+):
+    query = (
+        db.query(TypingRecord)
+        .options(joinedload(TypingRecord.student), joinedload(TypingRecord.text))
+        .order_by(TypingRecord.id.desc())
+    )
+    if student_id:
+        query = query.filter(TypingRecord.student_id == student_id)
+    return [_record_to_out(r) for r in query.limit(limit).all()]
 
 
 @router.get("/records/stats")
@@ -158,27 +188,32 @@ def class_stats(
     for s in students:
         records = (
             db.query(TypingRecord)
-            .filter(TypingRecord.student_id == s.id, TypingRecord.source == "practice")
+            .filter(TypingRecord.student_id == s.id)
             .order_by(TypingRecord.id.desc())
-            .limit(10)
+            .limit(20)
             .all()
         )
         if records:
             avg_wpm = round(sum(r.wpm for r in records) / len(records), 1)
             best_wpm = max(r.wpm for r in records)
             avg_acc = round(sum(r.accuracy for r in records) / len(records), 1)
+            scores = [r.score if r.score else score_typing_question(r.wpm, r.accuracy, 100, DEFAULT_TYPING_CONFIG)[0] for r in records]
+            avg_score = round(sum(scores) / len(scores), 1)
             latest_level = records[0].level
+            total_count = db.query(TypingRecord).filter(TypingRecord.student_id == s.id).count()
         else:
-            avg_wpm = best_wpm = avg_acc = 0
+            avg_wpm = best_wpm = avg_acc = avg_score = 0
             latest_level = "—"
+            total_count = 0
         stats.append({
             "student_id": s.id,
             "student_name": s.name,
             "class_name": s.class_name,
-            "practice_count": len(records),
+            "practice_count": total_count,
             "avg_wpm": avg_wpm,
             "best_wpm": best_wpm,
             "avg_accuracy": avg_acc,
+            "avg_score": avg_score,
             "latest_level": latest_level,
         })
     return stats
