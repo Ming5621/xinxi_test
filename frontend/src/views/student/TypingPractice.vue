@@ -25,7 +25,7 @@
         <section v-if="inClassTest" class="sidebar-section class-test-info">
           <h3>课堂测试</h3>
           <p>{{ classSession?.title }}</p>
-          <el-tag type="warning" size="small">5 分钟 · 不可暂停</el-tag>
+          <el-tag type="warning" size="small">5 分钟 · 不可停止</el-tag>
         </section>
 
         <section class="sidebar-section" v-if="!inClassTest">
@@ -59,7 +59,7 @@
             <el-radio-button value="test">5分钟测试</el-radio-button>
           </el-radio-group>
           <p class="mode-hint" v-if="practiceMode === 'free'">可随时暂停和停止</p>
-          <p class="mode-hint warn" v-else>开始后无法暂停或停止</p>
+          <p class="mode-hint" v-else>可随时停止并提交当前成绩</p>
         </section>
       </aside>
 
@@ -79,10 +79,11 @@
         </div>
         <TypingTest
           ref="typingRef"
-          :key="`${selected.id}-${practiceMode}-${sessionKey}`"
+          :key="`${selected.id}-${practiceMode}-${sessionKey}-${inClassTest}`"
           :reference-text="selected.content"
           :mode="practiceMode"
           :time-limit="300"
+          :allow-stop="!inClassTest"
           expanded
           @started="typingActive = true; lastResult = null"
           @finished="typingActive = false"

@@ -125,7 +125,7 @@ if (confirmVisible > 0) {
   await page.waitForTimeout(500)
 }
 check('5分钟测试无暂停按钮', await page.locator('button:has-text("暂停")').count() === 0)
-check('5分钟测试无停止按钮', await page.locator('button:has-text("停止")').count() === 0)
+check('5分钟测试有停止按钮', await page.locator('button:has-text("停止")').count() === 1)
 check('5分钟测试输入框可用', await page.locator('textarea.input-box').isEnabled())
 
 // 12. 我的成绩

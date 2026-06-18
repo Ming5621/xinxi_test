@@ -42,6 +42,10 @@
         <el-button type="danger" @click="stop">停止</el-button>
       </template>
 
+      <template v-if="mode === 'test' && allowStop && started && !finished">
+        <el-button type="danger" @click="stop">停止</el-button>
+      </template>
+
       <template v-if="finished">
         <div class="result-brief">
           <strong>{{ result.level }}</strong> · {{ result.wpm }} 字/分 · 准确率 {{ result.accuracy }}%
@@ -62,6 +66,7 @@ const props = defineProps({
   mode: { type: String, default: 'free' }, // free | test
   timeLimit: { type: Number, default: 300 },
   skipConfirm: { type: Boolean, default: false },
+  allowStop: { type: Boolean, default: false },
   expanded: { type: Boolean, default: false },
   maxScore: { type: Number, default: 100 },
 })
@@ -149,12 +154,15 @@ function tick() {
 
 async function start() {
   if (props.mode === 'test' && !props.skipConfirm) {
+    const message = props.allowStop
+      ? '5分钟测试开始后可随时停止并提交当前成绩，时间到也会自动结束。确定开始吗？'
+      : '测试开始后无法暂停或停止，时间到自动结束。确定开始吗？'
     try {
-      await ElMessageBox.confirm(
-        '5分钟测试开始后无法暂停或停止，时间到自动结束。确定开始吗？',
-        '开始测试',
-        { type: 'warning', confirmButtonText: '开始', cancelButtonText: '取消' }
-      )
+      await ElMessageBox.confirm(message, '开始测试', {
+        type: 'warning',
+        confirmButtonText: '开始',
+        cancelButtonText: '取消',
+      })
     } catch {
       return
     }
@@ -187,8 +195,9 @@ function resume() {
 }
 
 function stop() {
-  if (props.mode !== 'free') return
-  finish()
+  if (props.mode === 'free' || (props.mode === 'test' && props.allowStop)) {
+    finish()
+  }
 }
 
 function onInput() {
