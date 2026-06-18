@@ -199,6 +199,7 @@ if texts:
         "source": "practice",
     }, token=student_token)
     check("提交打字练习", code == 200 and typing_result.get("wpm", 0) >= 0)
+    check("打字练习返回评分", code == 200 and float(typing_result.get("score") or 0) > 0)
 
 code, records = req("GET", "/typing/records/my", token=student_token)
 check("查看打字记录", code == 200)

@@ -29,6 +29,12 @@ if "users" in inspector.get_table_names():
         if "last_seen_at" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN last_seen_at DATETIME"))
 
+if "typing_records" in inspector.get_table_names():
+    typing_cols = {c["name"] for c in inspector.get_columns("typing_records")}
+    with engine.begin() as conn:
+        if "score" not in typing_cols:
+            conn.execute(text("ALTER TABLE typing_records ADD COLUMN score FLOAT DEFAULT 0"))
+
 db = SessionLocal()
 
 if db.query(User).filter(User.username == "teacher").first() is None:

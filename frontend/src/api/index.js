@@ -94,6 +94,7 @@ export const typingApi = {
   texts: (difficulty) => api.get('/typing/texts', { params: { difficulty } }),
   submit: (data) => api.post('/typing/submit', data),
   myRecords: () => api.get('/typing/records/my'),
+  records: (studentId) => api.get('/typing/records', { params: { student_id: studentId } }),
   classStats: () => api.get('/typing/records/stats'),
   createText: (data) => api.post('/typing/texts', data),
   deleteText: (id) => api.delete(`/typing/texts/${id}`),

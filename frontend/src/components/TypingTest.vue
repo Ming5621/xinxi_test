@@ -45,6 +45,7 @@
       <template v-if="finished">
         <div class="result-brief">
           <strong>{{ result.level }}</strong> · {{ result.wpm }} 字/分 · 准确率 {{ result.accuracy }}%
+          <span v-if="result.score != null"> · 评分 {{ result.score }} 分</span>
         </div>
         <el-button @click="reset">再来一次</el-button>
       </template>
@@ -62,6 +63,7 @@ const props = defineProps({
   timeLimit: { type: Number, default: 300 },
   skipConfirm: { type: Boolean, default: false },
   expanded: { type: Boolean, default: false },
+  maxScore: { type: Number, default: 100 },
 })
 
 const emit = defineEmits(['complete', 'started', 'finished'])
@@ -109,6 +111,18 @@ function calcStats(typed, reference, seconds) {
   const mins = seconds > 1 ? seconds / 60 : 0
   const wpm = mins > 0 ? Math.round((correct / mins) * 10) / 10 : 0
   return { correct, accuracy: acc, wpm }
+}
+
+function calcScore(wpm, accuracy, maxScore) {
+  const minAccuracy = 95
+  const minWpm = 10
+  if (accuracy < 80) return Math.round(maxScore * 0.2 * 10) / 10
+  if (accuracy < minAccuracy) return Math.round(maxScore * 0.4 * (accuracy / minAccuracy) * 10) / 10
+  if (wpm >= 40) return maxScore
+  if (wpm >= 30) return Math.round(maxScore * 0.9 * 10) / 10
+  if (wpm >= 20) return Math.round(maxScore * 0.75 * 10) / 10
+  if (wpm >= minWpm) return Math.round(maxScore * 0.6 * 10) / 10
+  return Math.round(maxScore * (wpm / minWpm) * 0.4 * 10) / 10
 }
 
 function charClass(i) {
@@ -195,6 +209,7 @@ function finish() {
 
   const stats = calcStats(typedText.value, props.referenceText, elapsed.value)
   const level = standards.find((s) => stats.wpm >= s.min_wpm) || standards[standards.length - 1]
+  const score = calcScore(stats.wpm, stats.accuracy, props.maxScore)
 
   result.value = {
     wpm: stats.wpm,
@@ -203,6 +218,8 @@ function finish() {
     level: level.level,
     level_desc: '',
     passed: stats.wpm >= 10 && stats.accuracy >= 95,
+    score,
+    remark: `${level.level}（${stats.wpm} 字/分，准确率 ${stats.accuracy}%）`,
   }
 
   emit('complete', {

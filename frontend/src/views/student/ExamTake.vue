@@ -23,8 +23,8 @@
     <div class="question-area" v-if="currentQuestion">
       <div class="question-card">
         <div class="question-header">
-          <el-tag :type="typeTag(currentQuestion.type)" size="small">
-            {{ typeLabel(currentQuestion.type) }}
+          <el-tag :type="typeTag[currentQuestion.type]" size="small">
+            {{ typeLabel[currentQuestion.type] }}
           </el-tag>
           <span class="question-score">{{ currentQuestion.score }} 分</span>
         </div>
@@ -34,10 +34,17 @@
           <TypingTest
             :reference-text="currentQuestion.content"
             :time-limit="currentQuestion.typing_config?.time_limit || 120"
+            :max-score="currentQuestion.score"
             mode="test"
             :skip-confirm="true"
             @complete="onTypingComplete(currentQuestion.id, $event)"
           />
+          <div class="typing-result" v-if="answerMeta[currentQuestion.id]">
+            <el-tag type="success" effect="dark">{{ answerMeta[currentQuestion.id].level }}</el-tag>
+            <span>{{ answerMeta[currentQuestion.id].wpm }} 字/分</span>
+            <span>准确率 {{ answerMeta[currentQuestion.id].accuracy }}%</span>
+            <span v-if="answerMeta[currentQuestion.id].score != null">评分 {{ answerMeta[currentQuestion.id].score }} 分</span>
+          </div>
         </template>
 
         <template v-else>
@@ -157,26 +164,33 @@ function onTypingComplete(qId, data) {
     accuracy: data.accuracy,
     correct_chars: data.correct_chars,
     level: data.level,
+    score: data.score,
+    remark: data.remark,
   }
 }
 
 onMounted(async () => {
-  const [examData, qs] = await Promise.all([
-    examApi.get(examId),
-    examApi.questions(examId),
-  ])
-  exam.value = examData
-  questions.value = qs
-  timeLeft.value = examData.duration_minutes * 60
-  loading.value = false
-
-  timer = setInterval(() => {
-    timeLeft.value--
-    if (timeLeft.value <= 0) {
-      clearInterval(timer)
-      autoSubmit()
-    }
-  }, 1000)
+  try {
+    await examApi.start(examId)
+    const [examData, qs] = await Promise.all([
+      examApi.get(examId),
+      examApi.questions(examId),
+    ])
+    exam.value = examData
+    questions.value = qs
+    timeLeft.value = examData.duration_minutes * 60
+    timer = setInterval(() => {
+      timeLeft.value--
+      if (timeLeft.value <= 0) {
+        clearInterval(timer)
+        autoSubmit()
+      }
+    }, 1000)
+  } catch {
+    router.push('/student')
+  } finally {
+    loading.value = false
+  }
 })
 
 onUnmounted(() => clearInterval(timer))
@@ -225,6 +239,18 @@ async function doSubmit() {
   color: #6b7280;
   font-size: 14px;
   margin-bottom: 16px;
+}
+
+.typing-result {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 14px 18px;
+  background: #ecfdf5;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #065f46;
 }
 
 .exam-header {

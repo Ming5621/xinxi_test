@@ -161,6 +161,7 @@ class TypingRecord(Base):
     accuracy = Column(Float, default=0)
     correct_chars = Column(Integer, default=0)
     level = Column(String(20), default="")
+    score = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     student = relationship("User")
