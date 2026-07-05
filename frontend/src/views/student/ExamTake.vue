@@ -35,8 +35,10 @@
             :reference-text="currentQuestion.content"
             :time-limit="currentQuestion.typing_config?.time_limit || 120"
             :max-score="currentQuestion.score"
+            :typing-config="currentQuestion.typing_config"
             mode="test"
             :skip-confirm="true"
+            disable-retry
             @complete="onTypingComplete(currentQuestion.id, $event)"
           />
           <div class="typing-result" v-if="answerMeta[currentQuestion.id]">
@@ -95,7 +97,7 @@
         <el-button v-if="currentIndex < questions.length - 1" type="primary" @click="currentIndex++">
           下一题 <el-icon><ArrowRight /></el-icon>
         </el-button>
-        <el-button v-else type="success" @click="handleSubmit">
+        <el-button v-else type="success" :loading="submitting" @click="handleSubmit">
           提交试卷 <el-icon><Check /></el-icon>
         </el-button>
       </div>
@@ -108,7 +110,7 @@
           v-for="(q, i) in questions"
           :key="q.id"
           class="sheet-item"
-          :class="{ active: i === currentIndex, answered: answers[q.id] }"
+          :class="{ active: i === currentIndex, answered: isAnswered(q) }"
           @click="currentIndex = i"
         >{{ i + 1 }}</span>
       </div>
@@ -117,7 +119,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { examApi } from '@/api'
@@ -134,12 +136,42 @@ const answers = ref({})
 const answerMeta = ref({})
 const currentIndex = ref(0)
 const timeLeft = ref(0)
+const sessionStartTime = ref(null)
+const submitting = ref(false)
+const draftKey = `exam_draft_${examId}`
 let timer = null
 
 const currentQuestion = computed(() => questions.value[currentIndex.value])
 
 const typeLabel = { choice: '选择题', judge: '判断题', typing: '打字题' }
 const typeTag = { choice: '', judge: 'warning', typing: 'success' }
+
+function getRemainingSeconds(durationMinutes, startTime) {
+  if (!startTime) return durationMinutes * 60
+  const elapsed = Math.floor((Date.now() - new Date(startTime).getTime()) / 1000)
+  return Math.max(0, durationMinutes * 60 - elapsed)
+}
+
+function saveDraft() {
+  sessionStorage.setItem(draftKey, JSON.stringify({
+    answers: answers.value,
+    answerMeta: answerMeta.value,
+    currentIndex: currentIndex.value,
+  }))
+}
+
+function loadDraft() {
+  try {
+    const raw = sessionStorage.getItem(draftKey)
+    if (!raw) return
+    const draft = JSON.parse(raw)
+    answers.value = draft.answers || {}
+    answerMeta.value = draft.answerMeta || {}
+    currentIndex.value = draft.currentIndex || 0
+  } catch {
+    sessionStorage.removeItem(draftKey)
+  }
+}
 
 function isAnswered(q) {
   if (q.type === 'typing') return !!answerMeta.value[q.id]
@@ -171,27 +203,33 @@ function onTypingComplete(qId, data) {
 
 onMounted(async () => {
   try {
-    await examApi.start(examId)
+    const session = await examApi.start(examId)
+    sessionStartTime.value = session.start_time
     const [examData, qs] = await Promise.all([
       examApi.get(examId),
       examApi.questions(examId),
     ])
     exam.value = examData
     questions.value = qs
-    timeLeft.value = examData.duration_minutes * 60
+    loadDraft()
+    timeLeft.value = getRemainingSeconds(examData.duration_minutes, session.start_time)
     timer = setInterval(() => {
-      timeLeft.value--
+      timeLeft.value = getRemainingSeconds(examData.duration_minutes, sessionStartTime.value)
       if (timeLeft.value <= 0) {
         clearInterval(timer)
         autoSubmit()
       }
     }, 1000)
-  } catch {
+  } catch (e) {
+    const msg = e?.response?.data?.detail || e?.message || '加载考试失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '加载考试失败')
     router.push('/student')
   } finally {
     loading.value = false
   }
 })
+
+watch([answers, answerMeta, currentIndex], saveDraft, { deep: true })
 
 onUnmounted(() => clearInterval(timer))
 
@@ -201,31 +239,44 @@ async function autoSubmit() {
 }
 
 async function handleSubmit() {
-  const unanswered = questions.value.filter((q) => !isAnswered(q))
-  if (unanswered.length > 0) {
-    await ElMessageBox.confirm(
-      `还有 ${unanswered.length} 道题未作答，确定提交吗？`,
-      '提交确认',
-      { type: 'warning' }
-    )
-  } else {
-    await ElMessageBox.confirm('确定提交试卷吗？提交后不可修改。', '提交确认', { type: 'info' })
+  try {
+    const unanswered = questions.value.filter((q) => !isAnswered(q))
+    if (unanswered.length > 0) {
+      await ElMessageBox.confirm(
+        `还有 ${unanswered.length} 道题未作答，确定提交吗？`,
+        '提交确认',
+        { type: 'warning' }
+      )
+    } else {
+      await ElMessageBox.confirm('确定提交试卷吗？提交后不可修改。', '提交确认', { type: 'info' })
+    }
+    await doSubmit()
+  } catch {
+    // 用户取消
   }
-  await doSubmit()
 }
 
 async function doSubmit() {
-  const payload = {
-    answers: Object.entries(answers.value).map(([question_id, student_answer]) => ({
-      question_id: Number(question_id),
-      student_answer,
-      answer_meta: answerMeta.value[question_id] || null,
-    })),
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    const payload = {
+      answers: Object.entries(answers.value).map(([question_id, student_answer]) => ({
+        question_id: Number(question_id),
+        student_answer,
+        answer_meta: answerMeta.value[question_id] || null,
+      })),
+    }
+    const result = await examApi.submit(examId, payload)
+    clearInterval(timer)
+    sessionStorage.removeItem(draftKey)
+    ElMessage.success(`提交成功！得分: ${result.total_score}/${result.max_score}`)
+    router.push('/student/results')
+  } catch {
+    // 错误由拦截器提示
+  } finally {
+    submitting.value = false
   }
-  const result = await examApi.submit(examId, payload)
-  clearInterval(timer)
-  ElMessage.success(`提交成功！得分: ${result.total_score}/${result.max_score}`)
-  router.push('/student/results')
 }
 </script>
 

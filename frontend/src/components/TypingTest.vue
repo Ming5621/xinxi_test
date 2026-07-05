@@ -51,7 +51,7 @@
           <strong>{{ result.level }}</strong> · {{ result.wpm }} 字/分 · 准确率 {{ result.accuracy }}%
           <span v-if="result.score != null"> · 评分 {{ result.score }} 分</span>
         </div>
-        <el-button @click="reset">再来一次</el-button>
+        <el-button v-if="!disableRetry" @click="reset">再来一次</el-button>
       </template>
     </div>
   </div>
@@ -69,6 +69,8 @@ const props = defineProps({
   allowStop: { type: Boolean, default: false },
   expanded: { type: Boolean, default: false },
   maxScore: { type: Number, default: 100 },
+  disableRetry: { type: Boolean, default: false },
+  typingConfig: { type: Object, default: null },
 })
 
 const emit = defineEmits(['complete', 'started', 'finished'])
@@ -108,19 +110,28 @@ function getActiveElapsed() {
 }
 
 function calcStats(typed, reference, seconds) {
+  const ref = reference.trim()
+  const input = typed.trim()
   let correct = 0
-  for (let i = 0; i < typed.length; i++) {
-    if (typed[i] === reference[i]) correct++
+  const maxLen = Math.max(ref.length, input.length)
+  for (let i = 0; i < maxLen; i++) {
+    const refChar = i < ref.length ? ref[i] : ''
+    const typedChar = i < input.length ? input[i] : ''
+    if (refChar && typedChar && refChar === typedChar) {
+      correct += 1
+    }
   }
-  const acc = typed.length ? Math.round((correct / typed.length) * 100) : 100
+  const refLen = ref.length || 1
+  const acc = Math.round((correct / refLen) * 1000) / 10
   const mins = seconds > 1 ? seconds / 60 : 0
   const wpm = mins > 0 ? Math.round((correct / mins) * 10) / 10 : 0
   return { correct, accuracy: acc, wpm }
 }
 
 function calcScore(wpm, accuracy, maxScore) {
-  const minAccuracy = 95
-  const minWpm = 10
+  const cfg = props.typingConfig || {}
+  const minAccuracy = cfg.min_accuracy ?? 95
+  const minWpm = cfg.min_wpm ?? 10
   if (accuracy < 80) return Math.round(maxScore * 0.2 * 10) / 10
   if (accuracy < minAccuracy) return Math.round(maxScore * 0.4 * (accuracy / minAccuracy) * 10) / 10
   if (wpm >= 40) return maxScore
@@ -253,7 +264,10 @@ function reset() {
   emit('finished')
 }
 
-watch(() => [props.referenceText, props.mode], reset)
+watch(() => [props.referenceText, props.mode], () => {
+  if (props.disableRetry && finished.value) return
+  reset()
+})
 
 onUnmounted(() => clearInterval(timer))
 

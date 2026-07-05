@@ -147,7 +147,7 @@ if db.query(Exam).count() == 0:
         title="计算机基础知识测验",
         description="本次考试涵盖计算机硬件、操作系统及网络基础知识，包含选择题和判断题。",
         duration_minutes=45,
-        pass_score=60,
+        pass_score=30,
         created_by=teacher.id,
     )
     db.add(exam)
@@ -213,7 +213,7 @@ if db.query(Exam).filter(Exam.title == "初中信息技术打字测试").first()
         title="初中信息技术打字测试",
         description="参考中考信息技术及义务教育信息科技课标。达标：10字/分；良好：20字/分；优秀：30字/分；卓越：40字/分。准确率需≥95%。",
         duration_minutes=15,
-        pass_score=60,
+        pass_score=11,
         created_by=teacher.id,
     )
     db.add(typing_exam)

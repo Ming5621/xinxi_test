@@ -60,14 +60,27 @@ const router = createRouter({
   routes,
 })
 
+function loadStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user') || 'null')
+  } catch {
+    localStorage.removeItem('user')
+    return null
+  }
+}
+
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const user = loadStoredUser()
 
   if (to.meta.guest && token) {
     return next(homePath(user?.role))
   }
   if (to.meta.requiresAuth && !token) {
+    return next('/login')
+  }
+  if (to.meta.requiresAuth && token && !user) {
+    localStorage.removeItem('token')
     return next('/login')
   }
   if (to.meta.roles && user && !to.meta.roles.includes(user.role)) {

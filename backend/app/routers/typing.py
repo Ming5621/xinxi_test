@@ -306,7 +306,13 @@ def submit_typing(
             raise HTTPException(status_code=400, detail="您已提交过本次测试")
         source = "class_test"
 
-    comparison = compare_text(data.reference_text, data.typed_text)
+    reference_text = data.reference_text
+    if data.text_id:
+        text = db.query(TypingText).filter(TypingText.id == data.text_id).first()
+        if text:
+            reference_text = text.content
+
+    comparison = compare_text(reference_text, data.typed_text)
     wpm = calculate_wpm(comparison["correct_chars"], data.duration_seconds)
     level_info = get_typing_level(wpm)
     score, passed, remark = score_typing_question(
@@ -318,7 +324,7 @@ def submit_typing(
         text_id=data.text_id,
         typing_session_id=typing_session.id if typing_session else None,
         source=source,
-        reference_text=data.reference_text,
+        reference_text=reference_text,
         typed_text=data.typed_text,
         duration_seconds=data.duration_seconds,
         wpm=wpm,
@@ -347,7 +353,7 @@ def submit_typing(
 def _record_to_out(record: TypingRecord) -> TypingRecordOut:
     title = record.text.title if record.text else "自定义练习"
     score = record.score
-    if not score:
+    if score is None:
         score, _, _ = score_typing_question(record.wpm, record.accuracy, 100, DEFAULT_TYPING_CONFIG)
     return TypingRecordOut(
         id=record.id,
@@ -399,6 +405,10 @@ def list_records(
         .order_by(TypingRecord.id.desc())
     )
     if student_id:
+        student = db.query(User).filter(User.id == student_id).first()
+        if not student:
+            raise HTTPException(status_code=404, detail="学生不存在")
+        ensure_class_access(current_user, student.class_name)
         query = query.filter(TypingRecord.student_id == student_id)
     elif class_name:
         query = query.join(User).filter(User.class_name == class_name)

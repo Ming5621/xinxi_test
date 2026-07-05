@@ -13,18 +13,29 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+function handleUnauthorized(error) {
+  const isLoginRequest = error.config?.url?.includes('/auth/login')
+  if (isLoginRequest) {
+    const msg = error.response?.data?.detail || '用户名或密码错误'
+    ElMessage.error(typeof msg === 'string' ? msg : '用户名或密码错误')
+    return Promise.reject(error)
+  }
+  import('@/stores/auth').then(({ useAuthStore }) => {
+    useAuthStore().logout()
+  })
+  router.push('/login')
+  ElMessage.error('登录已过期，请重新登录')
+  return Promise.reject(error)
+}
+
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     const msg = error.response?.data?.detail || '请求失败'
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
-    } else {
-      ElMessage.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+      return handleUnauthorized(error)
     }
+    ElMessage.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
     return Promise.reject(error)
   }
 )
@@ -34,6 +45,13 @@ async function downloadExport(path, params = {}, filename = 'export.xlsx') {
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString()
   const url = `/api/export/${path}${qs ? `?${qs}` : ''}`
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (res.status === 401) {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore().logout()
+    router.push('/login')
+    ElMessage.error('登录已过期，请重新登录')
+    throw new Error('未授权')
+  }
   if (!res.ok) throw new Error('导出失败')
   const blob = await res.blob()
   const link = document.createElement('a')
