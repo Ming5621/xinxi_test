@@ -186,6 +186,23 @@ cd frontend && npm run dev
 
 前端开发服务器会自动代理 API 请求到后端。
 
+## 演示录制
+
+启动服务后，可用 Playwright 自动录制使用演示视频或截图：
+
+```bash
+# 安装演示依赖（仅需一次）
+npm install
+
+# 录制使用演示视频（输出到 /opt/cursor/artifacts/videos/）
+npm run demo:video
+
+# 批量截取界面截图
+npm run demo:screenshots
+```
+
+演示视频涵盖：登录页 → 教师端（学生管理、考试管理、统计）→ 学生端（考试大厅、打字练习、我的成绩）。
+
 ## 局域网部署说明
 
 1. 确保教师机防火墙允许 8000 端口入站
