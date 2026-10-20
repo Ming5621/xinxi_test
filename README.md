@@ -9,9 +9,10 @@
 **[⬇️ 点击下载 ExamSystem.zip（内含 ExamSystem.exe）](https://github.com/Ming5621/xinxi_test/releases/latest/download/ExamSystem.zip)**
 
 - 最新版本发布页：[Releases](https://github.com/Ming5621/xinxi_test/releases/latest)
-- 使用步骤：解压 zip → 双击 `ExamSystem.exe`（保持窗口不关）→ 本机访问 **`http://127.0.0.1:8000`**
-- 学生机访问窗口中显示的局域网地址（如 `http://192.168.x.x:8000`）
-- 若启动失败或一直转圈，请查看 `%APPDATA%\微机教室考试系统\launcher.log`，并确认 8000 端口未被占用
+- 使用步骤：解压 zip → 双击 `ExamSystem.exe`（保持窗口不关）
+- 程序会自动选择空闲端口（优先 `18765`），放行防火墙，并自动打开浏览器
+- 本机/学生机地址以启动器窗口显示为准（例如 `http://127.0.0.1:18765`）
+- 若启动失败，请查看 `%APPDATA%\微机教室考试系统\launcher.log` 与 `server.log`
 
 ## 功能特性
 
