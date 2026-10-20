@@ -82,7 +82,7 @@
       </div>
 
       <div class="question-nav">
-        <el-button :disabled="currentIndex === 0" @click="currentIndex--">
+        <el-button type="button" :disabled="currentIndex === 0" @click.left="goPrev">
           <el-icon><ArrowLeft /></el-icon> 上一题
         </el-button>
         <div class="nav-dots">
@@ -91,13 +91,26 @@
             :key="q.id"
             class="dot"
             :class="{ active: i === currentIndex, answered: isAnswered(q) }"
-            @click="currentIndex = i"
+            @click.left="goToQuestion(i)"
           />
         </div>
-        <el-button v-if="currentIndex < questions.length - 1" type="primary" @click="currentIndex++">
+        <el-button
+          v-if="currentIndex < questions.length - 1"
+          type="primary"
+          native-type="button"
+          @click.left="goNext"
+        >
           下一题 <el-icon><ArrowRight /></el-icon>
         </el-button>
-        <el-button v-else type="success" :loading="submitting" @click="handleSubmit">
+        <!-- 仅响应鼠标左键；切题后主动失焦，避免滚轮/空格误触提交 -->
+        <el-button
+          v-else
+          type="success"
+          native-type="button"
+          :loading="submitting"
+          class="submit-exam-btn"
+          @click.left="handleSubmit"
+        >
           提交试卷 <el-icon><Check /></el-icon>
         </el-button>
       </div>
@@ -116,7 +129,7 @@
           :key="q.id"
           class="sheet-item"
           :class="{ active: i === currentIndex, answered: isAnswered(q) }"
-          @click="currentIndex = i"
+          @click.left="goToQuestion(i)"
         >{{ i + 1 }}</span>
       </div>
     </div>
@@ -124,7 +137,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { examApi } from '@/api'
@@ -261,22 +274,58 @@ watch([answers, answerMeta, currentIndex], saveDraft, { deep: true })
 
 onUnmounted(() => clearInterval(timer))
 
+/** 切题后去掉按钮焦点，防止「下一题」变成「提交」后滚轮/空格误触发 */
+function blurActive() {
+  nextTick(() => {
+    const el = document.activeElement
+    if (el instanceof HTMLElement) el.blur()
+  })
+}
+
+function goPrev() {
+  if (currentIndex.value > 0) currentIndex.value -= 1
+  blurActive()
+}
+
+function goNext() {
+  if (currentIndex.value < questions.value.length - 1) currentIndex.value += 1
+  blurActive()
+}
+
+function goToQuestion(i) {
+  currentIndex.value = i
+  blurActive()
+}
+
 async function autoSubmit() {
   ElMessage.warning('考试时间到，系统自动提交！')
   await doSubmit()
 }
 
-async function handleSubmit() {
+async function handleSubmit(evt) {
+  // 忽略非主键点击、中键滚轮按下等
+  if (evt && typeof evt.button === 'number' && evt.button !== 0) return
   try {
+    // 先失焦，避免确认框默认按钮被滚轮/空格误点
+    blurActive()
     const unanswered = questions.value.filter((q) => !isAnswered(q))
+    const boxOpts = {
+      type: unanswered.length > 0 ? 'warning' : 'info',
+      confirmButtonText: '确认提交',
+      cancelButtonText: '继续答题',
+      closeOnClickModal: false,
+      closeOnPressEscape: true,
+      autofocus: false,
+      distinguishCancelAndClose: true,
+    }
     if (unanswered.length > 0) {
       await ElMessageBox.confirm(
         `还有 ${unanswered.length} 道题未作答，确定提交吗？`,
         '提交确认',
-        { type: 'warning' }
+        boxOpts
       )
     } else {
-      await ElMessageBox.confirm('确定提交试卷吗？提交后不可修改。', '提交确认', { type: 'info' })
+      await ElMessageBox.confirm('确定提交试卷吗？提交后不可修改。', '提交确认', boxOpts)
     }
     await doSubmit()
   } catch {
@@ -521,5 +570,10 @@ async function doSubmit() {
   background: #4f46e5;
   border-color: #4f46e5;
   color: white;
+}
+
+.submit-exam-btn {
+  /* 降低被页面滚动连带误触的概率 */
+  scroll-margin: 80px;
 }
 </style>
