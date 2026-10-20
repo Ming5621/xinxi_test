@@ -131,6 +131,7 @@ export const typingApi = {
   records: (params) => api.get('/typing/records', { params }),
   classStats: (className) => api.get('/typing/records/stats', { params: { class_name: className || undefined } }),
   createText: (data) => api.post('/typing/texts', data),
+  updateText: (id, data) => api.put(`/typing/texts/${id}`, data),
   deleteText: (id) => api.delete(`/typing/texts/${id}`),
   sessions: () => api.get('/typing/sessions'),
   activeSession: () => api.get('/typing/sessions/active'),

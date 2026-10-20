@@ -77,3 +77,25 @@ def list_accessible_classes(user: User, db) -> list[str]:
         q = q.filter(UserModel.class_name.in_(classes))
     rows = q.distinct().order_by(UserModel.class_name).all()
     return [r[0] for r in rows if r[0]]
+
+
+def teacher_ids_for_class(db, class_name: str) -> list[int]:
+    """返回管理该班级的教师 ID 列表（按 assigned_classes 匹配）。"""
+    from .models import User as UserModel
+
+    if not class_name:
+        return []
+    teachers = (
+        db.query(UserModel)
+        .filter(UserModel.role == UserRole.teacher, UserModel.is_active == True)
+        .all()
+    )
+    return [t.id for t in teachers if class_name in (t.assigned_classes or [])]
+
+
+def can_manage_typing_text(user: User, text) -> bool:
+    if user.role == UserRole.admin:
+        return True
+    if user.role == UserRole.teacher and text.teacher_id == user.id:
+        return True
+    return False

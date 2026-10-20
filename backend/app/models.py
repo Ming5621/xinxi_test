@@ -141,10 +141,11 @@ class Answer(Base):
 
 
 class TypingText(Base):
-    """打字练习素材库"""
+    """打字练习素材库（归属创建教师，按班级对学生可见）"""
     __tablename__ = "typing_texts"
 
     id = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     title = Column(String(200), nullable=False)
     content = Column(Text, nullable=False)
     difficulty = Column(Enum(TypingDifficulty), default=TypingDifficulty.basic)
@@ -152,6 +153,8 @@ class TypingText(Base):
     time_limit = Column(Integer, default=120)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    teacher = relationship("User", foreign_keys=[teacher_id])
 
 
 class TypingRecord(Base):
