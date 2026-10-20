@@ -225,10 +225,17 @@ function onInput() {
   if (props.mode === 'free' && typedText.value.length >= props.referenceText.length) {
     finish()
   }
-  // 跟随当前字符滚动对照区
+  // 仅在对照区内滚动，避免带动整页把「提交」按钮滚到指针下误触
   nextTick(() => {
-    const current = articleRef.value?.querySelector('.char.current')
-    current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    const box = articleRef.value
+    const current = box?.querySelector('.char.current')
+    if (!box || !current) return
+    const boxRect = box.getBoundingClientRect()
+    const charRect = current.getBoundingClientRect()
+    if (charRect.top < boxRect.top || charRect.bottom > boxRect.bottom) {
+      const delta = charRect.top - boxRect.top - boxRect.height / 2 + charRect.height / 2
+      box.scrollTop += delta
+    }
   })
 }
 
