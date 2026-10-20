@@ -14,7 +14,13 @@ from ..models import (
     User,
     UserRole,
 )
-from ..permissions import ensure_class_access, filter_class_name, get_assigned_classes
+from ..permissions import (
+    can_manage_typing_text,
+    ensure_class_access,
+    filter_class_name,
+    get_assigned_classes,
+    teacher_ids_for_class,
+)
 from ..schemas import (
     TypingClassSessionCreate,
     TypingClassSessionDetail,
@@ -25,6 +31,7 @@ from ..schemas import (
     TypingSubmitRequest,
     TypingTextCreate,
     TypingTextOut,
+    TypingTextUpdate,
 )
 from ..typing_utils import (
     DEFAULT_TYPING_CONFIG,
@@ -47,46 +54,126 @@ def get_standards():
     )
 
 
+def _text_to_out(text: TypingText) -> TypingTextOut:
+    return TypingTextOut(
+        id=text.id,
+        teacher_id=text.teacher_id,
+        teacher_name=text.teacher.name if text.teacher else "",
+        title=text.title,
+        content=text.content,
+        difficulty=text.difficulty,
+        char_count=text.char_count,
+        time_limit=text.time_limit,
+        is_active=text.is_active,
+    )
+
+
+def _student_visible_teacher_ids(db: Session, student: User) -> list[int]:
+    return teacher_ids_for_class(db, student.class_name or "")
+
+
 @router.get("/texts", response_model=list[TypingTextOut])
 def list_texts(
     difficulty: TypingDifficulty | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(TypingText).filter(TypingText.is_active == True)
+    """练习素材按教师账号隔离：教师看自己的；学生看管理其班级的教师素材。"""
+    query = (
+        db.query(TypingText)
+        .options(joinedload(TypingText.teacher))
+        .filter(TypingText.is_active == True)
+    )
     if difficulty:
         query = query.filter(TypingText.difficulty == difficulty)
-    return query.order_by(TypingText.id).all()
+
+    if current_user.role == UserRole.admin:
+        texts = query.order_by(TypingText.id).all()
+    elif current_user.role == UserRole.teacher:
+        texts = query.filter(TypingText.teacher_id == current_user.id).order_by(TypingText.id).all()
+    else:
+        teacher_ids = _student_visible_teacher_ids(db, current_user)
+        if not teacher_ids:
+            return []
+        texts = query.filter(TypingText.teacher_id.in_(teacher_ids)).order_by(TypingText.id).all()
+    return [_text_to_out(t) for t in texts]
 
 
 @router.post("/texts", response_model=TypingTextOut)
 def create_text(
     data: TypingTextCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
+    owner_id = current_user.id
+    content = data.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="练习内容不能为空")
     text = TypingText(
-        title=data.title,
-        content=data.content.strip(),
+        teacher_id=owner_id,
+        title=data.title.strip(),
+        content=content,
         difficulty=data.difficulty,
-        char_count=len(data.content.strip()),
+        char_count=len(content),
         time_limit=data.time_limit,
     )
     db.add(text)
     db.commit()
+    text = (
+        db.query(TypingText)
+        .options(joinedload(TypingText.teacher))
+        .filter(TypingText.id == text.id)
+        .first()
+    )
+    return _text_to_out(text)
+
+
+@router.put("/texts/{text_id}", response_model=TypingTextOut)
+def update_text(
+    text_id: int,
+    data: TypingTextUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    text = (
+        db.query(TypingText)
+        .options(joinedload(TypingText.teacher))
+        .filter(TypingText.id == text_id)
+        .first()
+    )
+    if not text or not text.is_active:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if not can_manage_typing_text(current_user, text):
+        raise HTTPException(status_code=403, detail="只能管理自己创建的练习内容")
+
+    if data.title is not None:
+        text.title = data.title.strip()
+    if data.content is not None:
+        content = data.content.strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="练习内容不能为空")
+        text.content = content
+        text.char_count = len(content)
+    if data.difficulty is not None:
+        text.difficulty = data.difficulty
+    if data.time_limit is not None:
+        text.time_limit = data.time_limit
+    db.commit()
     db.refresh(text)
-    return text
+    return _text_to_out(text)
 
 
 @router.delete("/texts/{text_id}")
 def delete_text(
     text_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
     text = db.query(TypingText).filter(TypingText.id == text_id).first()
     if not text:
         raise HTTPException(status_code=404, detail="素材不存在")
+    if not can_manage_typing_text(current_user, text):
+        raise HTTPException(status_code=403, detail="只能管理自己创建的练习内容")
     text.is_active = False
     db.commit()
     return {"message": "已删除"}
@@ -199,6 +286,8 @@ def create_session(
     text = db.query(TypingText).filter(TypingText.id == data.text_id, TypingText.is_active == True).first()
     if not text:
         raise HTTPException(status_code=404, detail="文章不存在")
+    if not can_manage_typing_text(current_user, text):
+        raise HTTPException(status_code=403, detail="只能使用自己创建的练习文章发起课堂测试")
     active = (
         db.query(TypingClassSession)
         .filter(
@@ -308,9 +397,16 @@ def submit_typing(
 
     reference_text = data.reference_text
     if data.text_id:
-        text = db.query(TypingText).filter(TypingText.id == data.text_id).first()
-        if text:
-            reference_text = text.content
+        text = db.query(TypingText).filter(TypingText.id == data.text_id, TypingText.is_active == True).first()
+        if not text:
+            raise HTTPException(status_code=404, detail="练习文章不存在")
+        visible_teachers = _student_visible_teacher_ids(db, current_user)
+        if text.teacher_id not in visible_teachers and not typing_session:
+            raise HTTPException(status_code=403, detail="无权练习该文章")
+        # 课堂测试允许使用本场指定文章
+        if typing_session and text.id != typing_session.text_id:
+            raise HTTPException(status_code=403, detail="课堂测试文章不匹配")
+        reference_text = text.content
 
     comparison = compare_text(reference_text, data.typed_text)
     wpm = calculate_wpm(comparison["correct_chars"], data.duration_seconds)

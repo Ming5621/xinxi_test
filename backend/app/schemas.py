@@ -248,6 +248,8 @@ class QuestionParseResult(BaseModel):
 # Typing
 class TypingTextOut(BaseModel):
     id: int
+    teacher_id: Optional[int] = None
+    teacher_name: str = ""
     title: str
     content: str
     difficulty: TypingDifficulty
@@ -263,6 +265,13 @@ class TypingTextCreate(BaseModel):
     content: str
     difficulty: TypingDifficulty = TypingDifficulty.basic
     time_limit: int = 120
+
+
+class TypingTextUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    difficulty: Optional[TypingDifficulty] = None
+    time_limit: Optional[int] = None
 
 
 class TypingSubmitRequest(BaseModel):

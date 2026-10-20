@@ -39,6 +39,12 @@ if "typing_records" in inspector.get_table_names():
         if "typing_session_id" not in typing_cols:
             conn.execute(text("ALTER TABLE typing_records ADD COLUMN typing_session_id INTEGER"))
 
+if "typing_texts" in inspector.get_table_names():
+    text_cols = {c["name"] for c in inspector.get_columns("typing_texts")}
+    with engine.begin() as conn:
+        if "teacher_id" not in text_cols:
+            conn.execute(text("ALTER TABLE typing_texts ADD COLUMN teacher_id INTEGER"))
+
 db = SessionLocal()
 
 if db.query(User).filter(User.username == "admin").first() is None:
@@ -107,39 +113,40 @@ for username, name, class_name in students_data:
 
 db.commit()
 
-# 打字练习素材
-if db.query(TypingText).count() == 0:
-    typing_texts = [
-        TypingText(
-            title="入门练习 — 键盘指法",
-            content="aaaa ssss dddd ffff jjjj kkkk llll ;;;; 中中中中 国国国国 人人人人",
-            difficulty=TypingDifficulty.beginner,
-            time_limit=60,
-        ),
-        TypingText(
-            title="基础练习 — 信息技术词汇",
-            content="计算机 键盘 鼠标 显示器 主机 软件 硬件 网络 浏览器 文件夹 复制 粘贴 删除 保存 打印",
-            difficulty=TypingDifficulty.basic,
-            time_limit=90,
-        ),
-        TypingText(
-            title="达标练习 — 中考模拟",
-            content="信息技术是一门研究信息获取、存储、传输和处理的学科。计算机由硬件系统和软件系统组成。操作系统是管理计算机硬件与软件资源的系统软件。",
-            difficulty=TypingDifficulty.standard,
-            time_limit=120,
-        ),
-        TypingText(
-            title="进阶练习 — 课文段落",
-            content="科学技术的飞速发展，使计算机网络成为人们生活中不可缺少的工具。通过网络，我们可以获取丰富的学习资源，与世界各地的人进行交流。作为新时代的中学生，我们应该掌握基本的信息技术技能，培养良好的信息素养。",
-            difficulty=TypingDifficulty.advanced,
-            time_limit=180,
-        ),
-    ]
-    for t in typing_texts:
-        t.char_count = len(t.content)
-        db.add(t)
+# 打字练习素材：绑定到教师账号
+teacher = db.query(User).filter(User.username == "teacher").first()
+teacher2 = db.query(User).filter(User.username == "teacher2").first()
+
+# 兼容旧数据：无归属的素材划给默认教师
+orphans = db.query(TypingText).filter(TypingText.teacher_id.is_(None)).all()
+if orphans and teacher:
+    for t in orphans:
+        t.teacher_id = teacher.id
     db.commit()
-    print("✓ 创建打字练习素材 4 篇")
+    print(f"✓ 已将 {len(orphans)} 篇旧练习素材绑定到教师 teacher")
+
+if db.query(TypingText).count() == 0 and teacher:
+    samples = [
+        ("入门练习 — 键盘指法", "aaaa ssss dddd ffff jjjj kkkk llll ;;;; 中中中中 国国国国 人人人人", TypingDifficulty.beginner, 60),
+        ("基础练习 — 信息技术词汇", "计算机 键盘 鼠标 显示器 主机 软件 硬件 网络 浏览器 文件夹 复制 粘贴 删除 保存 打印", TypingDifficulty.basic, 90),
+        ("达标练习 — 中考模拟", "信息技术是一门研究信息获取、存储、传输和处理的学科。计算机由硬件系统和软件系统组成。操作系统是管理计算机硬件与软件资源的系统软件。", TypingDifficulty.standard, 120),
+        ("进阶练习 — 课文段落", "科学技术的飞速发展，使计算机网络成为人们生活中不可缺少的工具。通过网络，我们可以获取丰富的学习资源，与世界各地的人进行交流。作为新时代的中学生，我们应该掌握基本的信息技术技能，培养良好的信息素养。", TypingDifficulty.advanced, 180),
+    ]
+    owners = [t for t in (teacher, teacher2) if t]
+    for owner in owners:
+        for title, content, diff, limit in samples:
+            db.add(
+                TypingText(
+                    teacher_id=owner.id,
+                    title=title,
+                    content=content,
+                    difficulty=diff,
+                    char_count=len(content),
+                    time_limit=limit,
+                )
+            )
+    db.commit()
+    print(f"✓ 创建打字练习素材 {len(samples) * len(owners)} 篇（已按教师账号绑定）")
 
 if db.query(Exam).count() == 0:
     teacher = db.query(User).filter(User.username == "teacher").first()

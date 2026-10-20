@@ -5,6 +5,32 @@
       <p>查看学生打字练习评分与历史记录</p>
     </div>
 
+    <div class="content-card materials-card">
+      <div class="toolbar">
+        <div>
+          <h3 class="section-title">我的练习素材</h3>
+          <p class="section-hint">练习内容与当前教师账号绑定，仅本班学生可见</p>
+        </div>
+        <el-button type="primary" @click="openCreate">
+          <el-icon><Plus /></el-icon> 添加素材
+        </el-button>
+      </div>
+      <el-table :data="myTexts" stripe v-loading="textsLoading" empty-text="暂无练习素材，请先添加">
+        <el-table-column prop="title" label="标题" min-width="160" />
+        <el-table-column label="难度" width="100">
+          <template #default="{ row }">{{ difficultyLabel(row.difficulty) }}</template>
+        </el-table-column>
+        <el-table-column prop="char_count" label="字数" width="80" />
+        <el-table-column prop="time_limit" label="建议时长(秒)" width="120" />
+        <el-table-column label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="danger" @click="removeText(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
     <div class="content-card" v-loading="loading">
       <div class="toolbar">
         <ClassFilter v-model="classFilter" @update:model-value="loadStats" />
@@ -88,12 +114,39 @@
         </el-table-column>
       </el-table>
     </el-dialog>
+
+    <el-dialog v-model="textDialogVisible" :title="editingText ? '编辑练习素材' : '添加练习素材'" width="640px">
+      <el-form :model="textForm" label-width="100px">
+        <el-form-item label="标题" required>
+          <el-input v-model="textForm.title" placeholder="例如：达标练习 — 中考模拟" />
+        </el-form-item>
+        <el-form-item label="难度">
+          <el-select v-model="textForm.difficulty" style="width: 100%">
+            <el-option label="入门" value="beginner" />
+            <el-option label="基础" value="basic" />
+            <el-option label="达标" value="standard" />
+            <el-option label="进阶" value="advanced" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="建议时长">
+          <el-input-number v-model="textForm.time_limit" :min="30" :max="600" />
+          <span class="form-unit">秒</span>
+        </el-form-item>
+        <el-form-item label="练习正文" required>
+          <el-input v-model="textForm.content" type="textarea" :rows="6" placeholder="学生对照录入的文字内容" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="textDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="textSaving" @click="saveText">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { typingApi, exportApi } from '@/api'
 import ClassFilter from '@/components/ClassFilter.vue'
 
@@ -105,6 +158,17 @@ const dialogVisible = ref(false)
 const recordsLoading = ref(false)
 const records = ref([])
 const currentStudent = ref(null)
+const myTexts = ref([])
+const textsLoading = ref(false)
+const textDialogVisible = ref(false)
+const textSaving = ref(false)
+const editingText = ref(null)
+const textForm = ref({
+  title: '',
+  content: '',
+  difficulty: 'basic',
+  time_limit: 120,
+})
 
 const levelColors = {
   '卓越': '#7c3aed', '优秀': '#10b981', '良好': '#3b82f6',
@@ -122,6 +186,63 @@ function speedColor(wpm) {
 
 function formatDate(value) {
   return new Date(value).toLocaleString('zh-CN')
+}
+
+function difficultyLabel(d) {
+  return { beginner: '入门', basic: '基础', standard: '达标', advanced: '进阶' }[d] || d
+}
+
+async function loadTexts() {
+  textsLoading.value = true
+  try {
+    myTexts.value = await typingApi.texts()
+  } finally {
+    textsLoading.value = false
+  }
+}
+
+function openCreate() {
+  editingText.value = null
+  textForm.value = { title: '', content: '', difficulty: 'basic', time_limit: 120 }
+  textDialogVisible.value = true
+}
+
+function openEdit(row) {
+  editingText.value = row
+  textForm.value = {
+    title: row.title,
+    content: row.content,
+    difficulty: row.difficulty,
+    time_limit: row.time_limit,
+  }
+  textDialogVisible.value = true
+}
+
+async function saveText() {
+  if (!textForm.value.title.trim() || !textForm.value.content.trim()) {
+    return ElMessage.warning('请填写标题和练习正文')
+  }
+  textSaving.value = true
+  try {
+    if (editingText.value) {
+      await typingApi.updateText(editingText.value.id, textForm.value)
+      ElMessage.success('已更新')
+    } else {
+      await typingApi.createText(textForm.value)
+      ElMessage.success('已添加（绑定到当前教师账号）')
+    }
+    textDialogVisible.value = false
+    await loadTexts()
+  } finally {
+    textSaving.value = false
+  }
+}
+
+async function removeText(row) {
+  await ElMessageBox.confirm(`确定删除「${row.title}」吗？`, '删除素材', { type: 'warning' })
+  await typingApi.deleteText(row.id)
+  ElMessage.success('已删除')
+  await loadTexts()
 }
 
 async function showRecords(row) {
@@ -152,7 +273,7 @@ async function handleExport() {
 onMounted(async () => {
   const std = await typingApi.standards()
   levels.value = std.levels
-  await loadStats()
+  await Promise.all([loadStats(), loadTexts()])
   loading.value = false
 })
 </script>
@@ -168,6 +289,27 @@ onMounted(async () => {
 .toolbar-right {
   display: flex;
   gap: 12px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.section-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.materials-card {
+  margin-bottom: 20px;
+}
+
+.form-unit {
+  margin-left: 8px;
+  color: #9ca3af;
 }
 
 .muted { color: #9ca3af; }
