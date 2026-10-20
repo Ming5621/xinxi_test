@@ -2,6 +2,15 @@
 
 面向微机教室局域网环境的在线考试系统。教师机在教室中作为服务器，学生机通过浏览器登录答题。
 
+## 下载 Windows 版（推荐）
+
+无需安装 Python / Node.js，解压后双击即可使用。
+
+**[⬇️ 点击下载 ExamSystem.zip（内含 ExamSystem.exe）](https://github.com/Ming5621/xinxi_test/releases/latest/download/ExamSystem.zip)**
+
+- 最新版本发布页：[Releases](https://github.com/Ming5621/xinxi_test/releases/latest)
+- 使用步骤：解压 zip → 双击 `ExamSystem.exe` → 学生机浏览器访问 `http://教师机IP:8000`
+
 ## 功能特性
 
 - **题型支持**：选择题、判断题
@@ -20,13 +29,11 @@
 | 前端 | Vue 3 + Vite + Element Plus + Pinia |
 | 认证 | JWT Token |
 
-## Windows 打包（exe 安装版）
+## Windows 打包（自行构建）
 
-无需安装 Python / Node.js，教师机双击即可使用。
+已发布的安装包请优先从上方 **[下载链接](https://github.com/Ming5621/xinxi_test/releases/latest/download/ExamSystem.zip)** 获取。
 
-### 获取安装包
-
-**方式一：自行打包（需 Windows 电脑）**
+若需自行打包（需 Windows 电脑）：
 
 ```bat
 packaging\build_windows.bat
@@ -37,9 +44,7 @@ packaging\build_windows.bat
 - `release\微机教室考试系统.zip` — 可直接分发
 - `release\微机教室考试系统_Setup.exe` — 安装版（需 Inno Setup，运行 `packaging\build_installer.bat`）
 
-**方式二：GitHub Actions 自动构建**
-
-在 GitHub 仓库 Actions 页面下载 `微机教室考试系统-Windows` 构建产物。
+也可在 GitHub Actions 页面下载 `ExamSystem-Windows` 构建产物。
 
 ### 教师机使用
 
