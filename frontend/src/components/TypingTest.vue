@@ -1,6 +1,5 @@
 <template>
-  <div class="typing-panel" :class="{ expanded }">
-    <!-- 简洁状态栏 -->
+  <div class="typing-panel" :class="{ expanded, 'hide-controls': hideControls }">
     <div class="status-bar" v-if="started">
       <span>{{ liveWpm }} 字/分</span>
       <span>准确率 {{ liveAccuracy }}%</span>
@@ -9,8 +8,7 @@
       <span v-if="paused" class="paused-tag">已暂停</span>
     </div>
 
-    <!-- 全文展示区（白底） -->
-    <div class="article-box">
+    <div class="article-box" ref="articleRef">
       <span
         v-for="(char, i) in referenceChars"
         :key="i"
@@ -19,19 +17,17 @@
       >{{ char === ' ' ? '\u00A0' : char }}</span>
     </div>
 
-    <!-- 打字输入区 -->
     <textarea
       ref="inputRef"
       v-model="typedText"
       class="input-box"
       :disabled="!started || finished || paused"
-      :placeholder="started ? '请开始输入...' : '点击开始后在此输入'"
+      :placeholder="started ? '请开始输入...' : '点击左侧「开始打字」后在此输入'"
       @input="onInput"
       @keydown="onKeydown"
     />
 
-    <!-- 操作按钮 -->
-    <div class="actions">
+    <div class="actions" v-if="!hideControls">
       <template v-if="!started && !finished">
         <el-button type="primary" size="large" @click="start">开始</el-button>
       </template>
@@ -71,9 +67,10 @@ const props = defineProps({
   maxScore: { type: Number, default: 100 },
   disableRetry: { type: Boolean, default: false },
   typingConfig: { type: Object, default: null },
+  hideControls: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['complete', 'started', 'finished'])
+const emit = defineEmits(['complete', 'started', 'finished', 'state'])
 
 const typedText = ref('')
 const started = ref(false)
@@ -86,6 +83,7 @@ const pausedDuration = ref(0)
 const pauseStart = ref(0)
 const result = ref(null)
 const inputRef = ref()
+const articleRef = ref()
 let timer = null
 
 const standards = [
@@ -102,6 +100,15 @@ const liveStats = computed(() => calcStats(typedText.value, props.referenceText,
 
 const liveWpm = computed(() => (started.value && !paused.value) ? liveStats.value.wpm : 0)
 const liveAccuracy = computed(() => started.value ? liveStats.value.accuracy : 100)
+
+function emitState() {
+  emit('state', {
+    started: started.value,
+    finished: finished.value,
+    paused: paused.value,
+    mode: props.mode,
+  })
+}
 
 function getActiveElapsed() {
   if (!started.value) return 0
@@ -189,6 +196,7 @@ async function start() {
   pausedDuration.value = 0
   timer = setInterval(tick, 200)
   emit('started')
+  emitState()
   nextTick(() => inputRef.value?.focus())
 }
 
@@ -196,12 +204,14 @@ function pause() {
   if (props.mode !== 'free' || !started.value || finished.value) return
   paused.value = true
   pauseStart.value = Date.now()
+  emitState()
 }
 
 function resume() {
   if (!paused.value) return
   pausedDuration.value += Date.now() - pauseStart.value
   paused.value = false
+  emitState()
   nextTick(() => inputRef.value?.focus())
 }
 
@@ -215,6 +225,11 @@ function onInput() {
   if (props.mode === 'free' && typedText.value.length >= props.referenceText.length) {
     finish()
   }
+  // 跟随当前字符滚动对照区
+  nextTick(() => {
+    const current = articleRef.value?.querySelector('.char.current')
+    current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
 }
 
 function onKeydown(e) {
@@ -249,6 +264,7 @@ function finish() {
     ...result.value,
   })
   emit('finished')
+  emitState()
 }
 
 function reset() {
@@ -262,6 +278,7 @@ function reset() {
   timeLeft.value = props.timeLimit
   pausedDuration.value = 0
   emit('finished')
+  emitState()
 }
 
 watch(() => [props.referenceText, props.mode], () => {
@@ -271,7 +288,7 @@ watch(() => [props.referenceText, props.mode], () => {
 
 onUnmounted(() => clearInterval(timer))
 
-defineExpose({ reset })
+defineExpose({ reset, start, pause, resume, stop, started, finished, paused, result })
 </script>
 
 <style scoped>
@@ -279,12 +296,13 @@ defineExpose({ reset })
   display: flex;
   flex-direction: column;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
 }
 
 .typing-panel.expanded {
   flex: 1;
-  min-height: 0;
-  gap: 16px;
+  gap: 14px;
 }
 
 .status-bar {
@@ -292,7 +310,7 @@ defineExpose({ reset })
   gap: 20px;
   font-size: 14px;
   color: #6b7280;
-  padding: 8px 0;
+  padding: 4px 0;
   flex-shrink: 0;
 }
 
@@ -306,24 +324,24 @@ defineExpose({ reset })
 .article-box {
   background: #fff;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 20px 24px;
   font-size: 18px;
   line-height: 2;
   letter-spacing: 1px;
-  min-height: 120px;
+  min-height: 140px;
   max-height: 280px;
   overflow-y: auto;
   color: #374151;
 }
 
 .typing-panel.expanded .article-box {
-  flex: 1.2;
-  min-height: 220px;
+  flex: 1.15;
+  min-height: 260px;
   max-height: none;
-  padding: 24px 28px;
-  font-size: 22px;
-  line-height: 2.1;
+  padding: 28px 32px;
+  font-size: 24px;
+  line-height: 2.15;
   letter-spacing: 1.5px;
 }
 
@@ -334,23 +352,24 @@ defineExpose({ reset })
 
 .input-box {
   width: 100%;
-  min-height: 100px;
+  min-height: 120px;
   padding: 16px;
   font-size: 18px;
   line-height: 1.8;
   border: 2px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 10px;
   resize: vertical;
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   outline: none;
   transition: border-color 0.2s;
+  box-sizing: border-box;
 }
 
 .typing-panel.expanded .input-box {
   flex: 1;
-  min-height: 180px;
-  padding: 20px 24px;
-  font-size: 22px;
+  min-height: 220px;
+  padding: 24px 28px;
+  font-size: 24px;
   line-height: 2;
   resize: none;
 }

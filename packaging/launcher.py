@@ -4,12 +4,16 @@
 双击 exe 后：初始化数据库 → 启动服务 → 自动打开浏览器
 版权所有 © 柴延明
 """
+from __future__ import annotations
+
 import os
 import socket
 import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -54,44 +58,40 @@ def write_log(msg: str) -> None:
 
 
 def get_local_ip() -> str:
+    """带超时，避免无外网时 connect(8.8.8.8) 卡死导致 exe 一直起不来。"""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1.5)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
         return ip
     except Exception:
-        return "127.0.0.1"
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
 
 
-def is_port_free(port: int, host: str = "0.0.0.0") -> bool:
+def health_url(port: int) -> str:
+    return f"http://127.0.0.1:{port}/api/health"
+
+
+def check_health(port: int, timeout: float = 1.0) -> bool:
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((host, port))
-        return True
-    except OSError:
+        with urllib.request.urlopen(health_url(port), timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
         return False
 
 
-def wait_for_port(port: int, host: str = "127.0.0.1", timeout: float = 30.0) -> bool:
+def wait_for_health(port: int, timeout: float = 60.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.5):
-                return True
-        except OSError:
-            time.sleep(0.2)
+        if check_health(port, timeout=0.8):
+            return True
+        time.sleep(0.3)
     return False
-
-
-def pick_port(preferred: int) -> int:
-    if is_port_free(preferred):
-        return preferred
-    for p in range(preferred + 1, preferred + 20):
-        if is_port_free(p):
-            return p
-    return preferred
 
 
 def setup_environment():
@@ -106,7 +106,7 @@ def setup_environment():
         sys.path.insert(0, str(backend))
 
     os.chdir(str(backend))
-    write_log(f"bundle={bundle} data={data} backend={backend}")
+    write_log(f"bundle={bundle} data={data} backend={backend} frozen={getattr(sys, 'frozen', False)}")
     return backend, data
 
 
@@ -114,19 +114,39 @@ def init_database():
     import seed  # noqa: F401
 
 
-def run_server(port: int):
-    """使用 app 对象启动，避免 PyInstaller 下字符串导入失败。"""
-    import uvicorn
-    from app.main import app
+def run_server(port: int, ready_event: threading.Event | None = None, error_box: dict | None = None):
+    """用 Config/Server 启动，禁用信号处理器，避免非主线程卡死。"""
+    try:
+        import uvicorn
+        from app.main import app
 
-    write_log(f"uvicorn starting on 0.0.0.0:{port}")
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level="warning",
-        access_log=False,
-    )
+        write_log(f"creating uvicorn server on 0.0.0.0:{port}")
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=port,
+            log_level="warning",
+            access_log=False,
+            lifespan="on",
+        )
+        server = uvicorn.Server(config)
+        # Windows / 子线程中安装信号处理器会失败或卡住
+        server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+
+        if ready_event is not None:
+            # 在启动循环前稍等，实际就绪靠健康检查
+            threading.Thread(
+                target=lambda: (time.sleep(0.5), ready_event.set()),
+                daemon=True,
+            ).start()
+
+        write_log("uvicorn.Server.run() begin")
+        server.run()
+        write_log("uvicorn.Server.run() exited")
+    except Exception as e:
+        write_log(f"run_server error: {e}\n{traceback.format_exc()}")
+        if error_box is not None:
+            error_box["err"] = e
 
 
 class LauncherApp:
@@ -136,16 +156,16 @@ class LauncherApp:
     TEXT = "#e0e7ff"
     MUTED = "#a5b4fc"
 
-    def __init__(self, port: int = 8000):
-        self.port = pick_port(port)
-        self.local_ip = get_local_ip()
+    def __init__(self, preferred_port: int = 8000):
+        self.preferred_port = preferred_port
+        self.port = preferred_port
+        self.local_ip = "127.0.0.1"
         self.data_dir = get_data_dir()
-        # 使用 127.0.0.1，避免 Windows 上 localhost 优先解析为 ::1 导致拒绝连接
         self.local_url = f"http://127.0.0.1:{self.port}"
         self.lan_url = f"http://{self.local_ip}:{self.port}"
         self.root = tk.Tk()
         self.root.title("微机教室在线考试系统")
-        self.root.geometry("520x520")
+        self.root.geometry("540x540")
         self.root.resizable(False, False)
         self.root.configure(bg=self.BG)
         self._center_window()
@@ -154,7 +174,7 @@ class LauncherApp:
 
     def _center_window(self):
         self.root.update_idletasks()
-        w, h = 520, 520
+        w, h = 540, 540
         x = (self.root.winfo_screenwidth() - w) // 2
         y = (self.root.winfo_screenheight() - h) // 2
         self.root.geometry(f"{w}x{h}+{x}+{y}")
@@ -163,40 +183,37 @@ class LauncherApp:
         header = tk.Frame(self.root, bg=self.BG)
         header.pack(fill="x", padx=28, pady=(28, 12))
 
-        title = tk.Label(
+        tk.Label(
             header,
             text="微机教室在线考试系统",
             font=("Microsoft YaHei UI", 18, "bold"),
             fg="white",
             bg=self.BG,
-        )
-        title.pack(anchor="w")
+        ).pack(anchor="w")
 
-        subtitle = tk.Label(
+        tk.Label(
             header,
             text="Computer Lab Online Examination System",
             font=("Segoe UI", 10),
             fg=self.MUTED,
             bg=self.BG,
-        )
-        subtitle.pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(4, 0))
 
         card = tk.Frame(self.root, bg=self.CARD, padx=20, pady=18)
         card.pack(fill="both", expand=True, padx=28, pady=8)
 
-        self.status_var = tk.StringVar(value="正在初始化...")
-        status = tk.Label(
+        self.status_var = tk.StringVar(value="正在启动，请稍候...")
+        tk.Label(
             card,
             textvariable=self.status_var,
             font=("Microsoft YaHei UI", 11),
             fg=self.TEXT,
             bg=self.CARD,
-            wraplength=420,
+            wraplength=440,
             justify="left",
-        )
-        status.pack(anchor="w")
+        ).pack(anchor="w")
 
-        self.progress = ttk.Progressbar(card, mode="indeterminate", length=420)
+        self.progress = ttk.Progressbar(card, mode="indeterminate", length=440)
         self.progress.pack(fill="x", pady=(14, 18))
         self.progress.start(12)
 
@@ -216,7 +233,7 @@ class LauncherApp:
             "  管理员: admin / admin123\n"
             "  教师: teacher / teacher123\n"
             "  学生: student01 / 123456\n"
-            f"\n若无法打开，请查看日志:\n  {get_log_path()}"
+            f"\n日志: {get_log_path()}"
         )
         tk.Label(
             card,
@@ -257,12 +274,21 @@ class LauncherApp:
     def set_status(self, text: str, running: bool = False):
         self.status_var.set(text)
         if running:
-            self.progress.stop()
-            self.progress.pack_forget()
+            try:
+                self.progress.stop()
+                self.progress.pack_forget()
+            except Exception:
+                pass
             self.open_btn.config(state="normal")
 
+    def update_urls(self):
+        self.local_url = f"http://127.0.0.1:{self.port}"
+        self.lan_url = f"http://{self.local_ip}:{self.port}"
+        self.url_local.set(self.local_url)
+        self.url_lan.set(self.lan_url)
+
     def open_browser(self):
-        webbrowser.open(self.url_local.get())
+        webbrowser.open(self.local_url)
 
     def _on_close(self):
         if messagebox.askokcancel("退出", "关闭窗口将停止考试系统服务，确定退出吗？"):
@@ -272,80 +298,107 @@ class LauncherApp:
     def start_background(self):
         threading.Thread(target=self._bootstrap, daemon=True).start()
 
+    def _mark_ready(self, reused: bool = False):
+        msg = "服务已在运行 · 可直接打开浏览器" if reused else "服务运行中 · 关闭本窗口即可停止服务"
+        self.set_status(msg, running=True)
+        self.update_urls()
+        if not os.environ.get("EXAM_NO_BROWSER"):
+            self.open_browser()
+
     def _bootstrap(self):
         try:
             write_log("bootstrap start")
-            setup_environment()
+            self.local_ip = get_local_ip()
+            write_log(f"local_ip={self.local_ip}")
+            self.root.after(0, self.update_urls)
+
+            # 若本机已有实例在跑，直接复用，避免二次启动失败
+            if check_health(self.preferred_port):
+                write_log(f"reuse existing server on {self.preferred_port}")
+                self.port = self.preferred_port
+                self.root.after(0, lambda: self._mark_ready(reused=True))
+                return
+
             self.root.after(0, lambda: self.set_status("正在初始化数据库..."))
+            setup_environment()
             init_database()
             write_log("database ready")
 
-            self.root.after(0, lambda: self.set_status(f"服务启动中（端口 {self.port}）..."))
-            self.root.after(0, lambda: self.url_local.set(self.local_url))
-            self.root.after(0, lambda: self.url_lan.set(self.lan_url))
+            last_err = None
+            for port in range(self.preferred_port, self.preferred_port + 15):
+                if check_health(port):
+                    self.port = port
+                    write_log(f"found healthy server while scanning port {port}")
+                    self.root.after(0, lambda: self._mark_ready(reused=True))
+                    return
 
-            # 先在后台线程启动 uvicorn，再等待端口真正就绪
-            server_error = {"err": None}
+                self.port = port
+                self.root.after(0, lambda p=port: self.set_status(f"服务启动中（端口 {p}）..."))
+                self.root.after(0, self.update_urls)
 
-            def _serve():
-                try:
-                    run_server(self.port)
-                except Exception as e:
-                    server_error["err"] = e
-                    write_log(f"server crashed: {e}\n{traceback.format_exc()}")
-
-            threading.Thread(target=_serve, daemon=True).start()
-
-            if not wait_for_port(self.port, host="127.0.0.1", timeout=45.0):
-                err = server_error["err"]
-                detail = str(err) if err else f"端口 {self.port} 未能在限定时间内就绪"
-                raise RuntimeError(
-                    f"服务启动失败：{detail}\n\n"
-                    f"请确认端口未被占用，或以管理员身份运行。\n"
-                    f"日志文件：{get_log_path()}"
+                error_box: dict = {"err": None}
+                t = threading.Thread(
+                    target=run_server,
+                    args=(port, None, error_box),
+                    daemon=True,
                 )
+                t.start()
+                write_log(f"waiting health on {port}")
 
-            write_log(f"port {self.port} is ready")
-            self.root.after(
-                0,
-                lambda: self.set_status("服务运行中 · 关闭本窗口即可停止服务", running=True),
+                if wait_for_health(port, timeout=25.0):
+                    write_log(f"health ok on {port}")
+                    self.root.after(0, lambda: self._mark_ready(reused=False))
+                    return
+
+                last_err = error_box.get("err")
+                write_log(f"port {port} not healthy, err={last_err}")
+                time.sleep(0.4)
+
+            detail = str(last_err) if last_err else "多个端口均未能成功启动"
+            raise RuntimeError(
+                f"服务启动失败：{detail}\n\n"
+                f"请关闭占用 8000 端口的程序后重试，或以管理员身份运行。\n"
+                f"日志：{get_log_path()}"
             )
-            if not os.environ.get("EXAM_NO_BROWSER"):
-                self.root.after(300, self.open_browser)
         except Exception as e:
             write_log(f"bootstrap failed: {e}\n{traceback.format_exc()}")
             self.root.after(0, lambda: self._show_error(str(e)))
 
     def _show_error(self, msg: str):
-        self.progress.stop()
+        try:
+            self.progress.stop()
+        except Exception:
+            pass
         messagebox.showerror("启动失败", msg)
         self.root.destroy()
         sys.exit(1)
 
     def run(self):
-        self.start_background()
+        # 先显示窗口，再后台初始化，避免用户感觉“点了没反应”
+        self.root.after(100, self.start_background)
         self.root.mainloop()
 
 
 def main():
     preferred = int(os.environ.get("EXAM_PORT", "8000"))
-    port = pick_port(preferred)
-    write_log(f"main preferred={preferred} selected={port}")
+    write_log(f"main preferred={preferred}")
 
     if tk is None:
         setup_environment()
         init_database()
-        local_url = f"http://127.0.0.1:{port}"
+        if check_health(preferred):
+            webbrowser.open(f"http://127.0.0.1:{preferred}")
+            while True:
+                time.sleep(3600)
         if not os.environ.get("EXAM_NO_BROWSER"):
-            def _open():
-                if wait_for_port(port):
-                    webbrowser.open(local_url)
-
-            threading.Thread(target=_open, daemon=True).start()
-        run_server(port)
+            threading.Thread(
+                target=lambda: (wait_for_health(preferred), webbrowser.open(f"http://127.0.0.1:{preferred}")),
+                daemon=True,
+            ).start()
+        run_server(preferred)
         return
 
-    LauncherApp(port).run()
+    LauncherApp(preferred).run()
 
 
 if __name__ == "__main__":

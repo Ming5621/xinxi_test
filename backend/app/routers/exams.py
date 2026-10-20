@@ -155,7 +155,16 @@ def get_exam(
         raise HTTPException(status_code=404, detail="考试不存在")
     out = _exam_to_out(exam)
     if current_user.role.value == "student":
-        return ExamDetailOut(**out.model_dump(), questions=[])
+        # 返回题目内容但不含标准答案，避免前端只读 get 接口时看不到题
+        safe_questions = []
+        for q in exam.questions:
+            item = QuestionOut.model_validate(q)
+            item.correct_answer = ""
+            if q.type == QuestionType.typing:
+                # 打字题 options 为配置对象，学生端用 content 作对照文
+                pass
+            safe_questions.append(item)
+        return ExamDetailOut(**out.model_dump(), questions=safe_questions)
     return ExamDetailOut(**out.model_dump(), questions=[QuestionOut.model_validate(q) for q in exam.questions])
 
 

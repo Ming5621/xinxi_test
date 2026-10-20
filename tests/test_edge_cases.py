@@ -211,7 +211,12 @@ leak_id = exam.get("id")
 req("POST", f"/exams/{leak_id}/publish", token=teacher)
 code, student_exam = req("GET", f"/exams/{leak_id}", token=student)
 code, teacher_exam = req("GET", f"/exams/{leak_id}", token=teacher)
-check("学生看不到题目答案", code == 200 and len(student_exam.get("questions", [])) == 0)
+check(
+    "学生可见题目但无答案",
+    code == 200
+    and len(student_exam.get("questions", [])) >= 1
+    and student_exam["questions"][0].get("correct_answer") in ("", None),
+)
 check("教师可查看完整题目", teacher_exam.get("questions") and teacher_exam["questions"][0].get("correct_answer") == "B")
 req("DELETE", f"/exams/{leak_id}", token=teacher)
 

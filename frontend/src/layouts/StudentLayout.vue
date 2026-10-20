@@ -27,7 +27,7 @@
       </router-link>
     </nav>
 
-    <main class="main">
+    <main class="main" :class="{ wide: $route.name === 'TypingPractice' }">
       <router-view />
       <CopyrightFooter />
     </main>
@@ -131,5 +131,9 @@ async function handleLogout() {
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+}
+
+.main.wide {
+  max-width: 1480px;
 }
 </style>
