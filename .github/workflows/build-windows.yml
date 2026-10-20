@@ -3,11 +3,15 @@ name: Build Windows Release
 on:
   workflow_dispatch:
   push:
-    branches: [cursor/exam-system-e01f, main]
+    branches: [main]
     paths:
       - 'backend/**'
       - 'frontend/**'
       - 'packaging/**'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -40,6 +44,7 @@ jobs:
       - name: Create zip
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item packaging\启动考试系统.bat dist\ExamSystem\启动考试系统.bat -Force
           Compress-Archive -Path "dist\ExamSystem\*" -DestinationPath "release\ExamSystem.zip" -Force
         shell: pwsh
 
@@ -51,3 +56,32 @@ jobs:
             dist/ExamSystem/
             release/ExamSystem.zip
           retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.2.1
+          name: 微机教室考试系统 v1.2.1
+          body: |
+            ## 下载说明
+
+            解压 **ExamSystem.zip** 到 Windows 教师机，双击 **ExamSystem.exe** 即可启动。
+
+            浏览器请访问：`http://127.0.0.1:8000`（不要用可能导致 IPv6 失败的 localhost）
+
+            ### v1.2.1 修复
+            - 修复绿色版启动后浏览器显示「localhost 拒绝连接」
+            - PyInstaller 下改为直接加载 FastAPI app，避免服务未真正启动
+            - 等待端口就绪后再自动打开浏览器
+            - 本机访问改用 `127.0.0.1`，避免 Windows IPv6/localhost 问题
+            - 启动失败写入 `%APPDATA%\微机教室考试系统\launcher.log`
+            - 补齐打包缺失模块（presence / import_data 等）
+
+            ### 默认账号
+            | 角色 | 用户名 | 密码 |
+            |------|--------|------|
+            | 管理员 | admin | admin123 |
+            | 教师 | teacher | teacher123 |
+            | 学生 | student01~05 | 123456 |
+          files: release/ExamSystem.zip
+          make_latest: true
