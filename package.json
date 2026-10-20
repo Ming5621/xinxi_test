@@ -1,0 +1,12 @@
+{
+  "name": "exam-system",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo:video": "node scripts/demo-video.mjs",
+    "demo:screenshots": "node scripts/demo-screenshots.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}
