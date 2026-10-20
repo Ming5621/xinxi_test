@@ -7,6 +7,6 @@
     "demo:screenshots": "node scripts/demo-screenshots.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.58.2"
+    "playwright": "^1.64.1"
   }
 }

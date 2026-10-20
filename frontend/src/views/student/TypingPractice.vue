@@ -2,7 +2,7 @@
   <div class="typing-page">
     <div class="page-header">
       <h1>打字练习</h1>
-      <p>左侧选择文章和模式，右侧开始练习</p>
+      <p>左侧选择文章并开始，右侧上方为对照文章，下方为输入区</p>
     </div>
 
     <el-alert
@@ -20,7 +20,7 @@
     </el-alert>
 
     <div class="typing-layout">
-      <!-- 左侧：选项目 -->
+      <!-- 左侧：选择 + 开始打字 -->
       <aside class="sidebar content-card" :class="{ locked: inClassTest }">
         <section v-if="inClassTest" class="sidebar-section class-test-info">
           <h3>课堂测试</h3>
@@ -61,9 +61,43 @@
           <p class="mode-hint" v-if="practiceMode === 'free'">可随时暂停和停止</p>
           <p class="mode-hint" v-else>可随时停止并提交当前成绩</p>
         </section>
+
+        <section class="sidebar-section start-section" v-if="selected">
+          <h3>开始打字</h3>
+          <div class="control-stack">
+            <el-button
+              v-if="!typingActive && !lastFinished"
+              type="primary"
+              size="large"
+              class="start-btn"
+              @click="startTyping"
+            >
+              开始打字
+            </el-button>
+
+            <template v-if="typingActive && practiceMode === 'free'">
+              <el-button v-if="!panelPaused" size="large" class="start-btn" @click="typingRef?.pause()">暂停</el-button>
+              <el-button v-else type="primary" size="large" class="start-btn" @click="typingRef?.resume()">继续</el-button>
+              <el-button type="danger" size="large" class="start-btn" @click="typingRef?.stop()">停止</el-button>
+            </template>
+
+            <template v-if="typingActive && practiceMode === 'test' && !inClassTest">
+              <el-button type="danger" size="large" class="start-btn" @click="typingRef?.stop()">停止</el-button>
+            </template>
+
+            <el-button
+              v-if="lastFinished && !typingActive"
+              size="large"
+              class="start-btn"
+              @click="retryTyping"
+            >
+              再来一次
+            </el-button>
+          </div>
+        </section>
       </aside>
 
-      <!-- 右侧：参考文章 + 打字区 -->
+      <!-- 右侧：对照文章 + 输入框 -->
       <section class="main-panel content-card" v-if="selected">
         <div class="score-card" v-if="lastResult">
           <div class="score-main">
@@ -85,8 +119,10 @@
           :time-limit="300"
           :allow-stop="!inClassTest"
           expanded
-          @started="typingActive = true; lastResult = null"
-          @finished="typingActive = false"
+          hide-controls
+          @started="onStarted"
+          @finished="onFinished"
+          @state="onPanelState"
           @complete="handleComplete"
         />
       </section>
@@ -139,6 +175,8 @@ const sessionKey = ref(0)
 const typingRef = ref()
 const classSession = ref(null)
 const inClassTest = ref(false)
+const panelPaused = ref(false)
+const lastFinished = ref(false)
 
 const selected = computed(() => texts.value.find((t) => t.id === selectedId.value))
 const typingActive = ref(false)
@@ -179,10 +217,14 @@ async function loadTexts() {
 function selectText(id) {
   if (typingActive.value || selectedId.value === id) return
   selectedId.value = id
+  lastFinished.value = false
+  lastResult.value = null
   sessionKey.value++
 }
 
 function onModeChange() {
+  lastFinished.value = false
+  lastResult.value = null
   sessionKey.value++
 }
 
@@ -207,12 +249,44 @@ function joinClassTest() {
   practiceMode.value = 'test'
   sessionKey.value++
   lastResult.value = null
+  lastFinished.value = false
+}
+
+function startTyping() {
+  typingRef.value?.start()
+}
+
+function retryTyping() {
+  lastFinished.value = false
+  lastResult.value = null
+  typingRef.value?.reset()
+  sessionKey.value++
+  // 下一帧自动开始
+  setTimeout(() => typingRef.value?.start(), 50)
+}
+
+function onStarted() {
+  typingActive.value = true
+  lastResult.value = null
+  lastFinished.value = false
+  panelPaused.value = false
+}
+
+function onFinished() {
+  typingActive.value = false
+  panelPaused.value = false
+}
+
+function onPanelState(state) {
+  panelPaused.value = !!state.paused
+  if (state.finished) lastFinished.value = true
 }
 
 let sessionPollTimer = null
 
 async function handleComplete(data) {
   typingActive.value = false
+  lastFinished.value = true
   const payload = {
     text_id: selected.value.id,
     reference_text: selected.value.content,
@@ -265,25 +339,42 @@ onUnmounted(() => {
 .typing-page {
   max-width: none;
   margin: 0;
+  width: 100%;
   min-height: calc(100vh - 132px);
   display: flex;
   flex-direction: column;
+}
+
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-header h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+}
+
+.page-header p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 14px;
 }
 
 .typing-layout {
   flex: 1;
   display: flex;
   gap: 20px;
-  min-height: 0;
+  min-height: calc(100vh - 280px);
+  align-items: stretch;
 }
 
 .sidebar {
-  width: 280px;
+  width: 300px;
   flex-shrink: 0;
   margin-bottom: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 22px;
   overflow-y: auto;
 }
 
@@ -366,8 +457,20 @@ onUnmounted(() => {
   color: #9ca3af;
 }
 
-.mode-hint.warn {
-  color: #f59e0b;
+.start-section {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.start-btn {
+  width: 100%;
 }
 
 .main-panel {
@@ -377,7 +480,7 @@ onUnmounted(() => {
   padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 560px;
 }
 
 .empty {
@@ -395,6 +498,7 @@ onUnmounted(() => {
   padding: 18px 22px;
   border-radius: 12px;
   background: linear-gradient(135deg, #eef2ff, #ecfdf5);
+  flex-shrink: 0;
 }
 
 .score-main {
@@ -435,5 +539,20 @@ onUnmounted(() => {
 .history-card h3 {
   margin: 0 0 16px;
   font-size: 16px;
+}
+
+@media (max-width: 900px) {
+  .typing-layout {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
+
+  .main-panel {
+    min-height: 480px;
+  }
 }
 </style>

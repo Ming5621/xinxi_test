@@ -94,20 +94,20 @@ check('文章选择器存在', await page.locator('.text-item, .text-list').coun
 check('模式切换存在', await page.locator('text=自由练习').count() >= 1)
 check('模式切换存在-5分钟', await page.locator('text=5分钟测试').count() >= 1)
 
-// 自由练习
-await page.locator('button:has-text("开始")').click()
+// 自由练习（开始按钮在左侧）
+await page.locator('button:has-text("开始打字")').click()
 await page.waitForTimeout(500)
 check('开始打字', await page.locator('textarea.input-box').isEnabled())
 await page.locator('textarea.input-box').fill('aaaa')
 await page.waitForTimeout(300)
-check('暂停按钮显示', await page.locator('button:has-text("暂停")').count() === 1)
-check('停止按钮显示', await page.locator('button:has-text("停止")').count() === 1)
+check('暂停按钮显示', await page.locator('.sidebar button:has-text("暂停")').count() === 1)
+check('停止按钮显示', await page.locator('.sidebar button:has-text("停止")').count() === 1)
 
 // 暂停/继续
-await page.locator('button:has-text("暂停")').click()
+await page.locator('.sidebar button:has-text("暂停")').click()
 await page.waitForTimeout(300)
 check('暂停后输入禁用', !(await page.locator('textarea.input-box').isEnabled()))
-await page.locator('button:has-text("继续")').click()
+await page.locator('.sidebar button:has-text("继续")').click()
 await page.waitForTimeout(300)
 check('继续后输入启用', await page.locator('textarea.input-box').isEnabled())
 
@@ -116,16 +116,16 @@ await page.reload()
 await page.waitForTimeout(1000)
 await page.locator('text=5分钟测试').click()
 await page.waitForTimeout(300)
-await page.locator('button:has-text("开始")').click()
+await page.locator('button:has-text("开始打字")').click()
 // 确认对话框
 await page.waitForTimeout(500)
 const confirmVisible = await page.locator('.el-message-box').count()
 if (confirmVisible > 0) {
-  await page.locator('button:has-text("开始")').last().click()
+  await page.locator('.el-message-box button:has-text("开始")').last().click()
   await page.waitForTimeout(500)
 }
-check('5分钟测试无暂停按钮', await page.locator('button:has-text("暂停")').count() === 0)
-check('5分钟测试有停止按钮', await page.locator('button:has-text("停止")').count() === 1)
+check('5分钟测试无暂停按钮', await page.locator('.sidebar button:has-text("暂停")').count() === 0)
+check('5分钟测试有停止按钮', await page.locator('.sidebar button:has-text("停止")').count() === 1)
 check('5分钟测试输入框可用', await page.locator('textarea.input-box').isEnabled())
 
 // 12. 我的成绩

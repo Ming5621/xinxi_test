@@ -54,14 +54,14 @@
 
         <div class="options" v-if="currentQuestion.type === 'choice'">
           <div
-            v-for="opt in currentQuestion.options"
-            :key="opt"
+            v-for="opt in choiceOptions(currentQuestion)"
+            :key="opt.value"
             class="option-item"
-            :class="{ selected: answers[currentQuestion.id] === opt[0] }"
-            @click="selectAnswer(currentQuestion.id, opt[0])"
+            :class="{ selected: answers[currentQuestion.id] === opt.value }"
+            @click="selectAnswer(currentQuestion.id, opt.value)"
           >
-            <span class="option-letter">{{ opt[0] }}</span>
-            <span class="option-text">{{ opt.slice(3) }}</span>
+            <span class="option-letter">{{ opt.letter }}</span>
+            <span class="option-text">{{ opt.text }}</span>
           </div>
         </div>
 
@@ -103,7 +103,12 @@
       </div>
     </div>
 
-    <div class="answer-sheet">
+    <el-empty
+      v-else-if="!loading && exam && !questions.length"
+      description="未获取到考试题目，请返回考试大厅重新进入"
+    />
+
+    <div class="answer-sheet" v-if="questions.length">
       <h4>答题卡</h4>
       <div class="sheet-grid">
         <span
@@ -178,6 +183,21 @@ function isAnswered(q) {
   return !!answers.value[q.id]
 }
 
+/** 兼容 "A. 文本" / "A.文本" / 纯文本 等多种选项格式 */
+function choiceOptions(question) {
+  const letters = ['A', 'B', 'C', 'D']
+  const raw = Array.isArray(question.options) ? question.options : []
+  return raw.map((opt, i) => {
+    const text = String(opt ?? '')
+    const m = text.match(/^\s*([A-Da-d])[.、．:：\s]\s*(.*)$/)
+    if (m) {
+      return { letter: m[1].toUpperCase(), value: m[1].toUpperCase(), text: m[2] || text }
+    }
+    const letter = letters[i] || String(i + 1)
+    return { letter, value: letter, text }
+  })
+}
+
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
@@ -207,10 +227,18 @@ onMounted(async () => {
     sessionStartTime.value = session.start_time
     const [examData, qs] = await Promise.all([
       examApi.get(examId),
-      examApi.questions(examId),
+      examApi.questions(examId).catch(() => []),
     ])
     exam.value = examData
-    questions.value = qs
+    // 优先专用题目接口；若为空则回退到详情中的题目（不含答案）
+    const fromQuestionsApi = Array.isArray(qs) ? qs : []
+    const fromExamDetail = Array.isArray(examData?.questions) ? examData.questions : []
+    questions.value = fromQuestionsApi.length ? fromQuestionsApi : fromExamDetail
+    if (!questions.value.length) {
+      ElMessage.error('未获取到考试题目，请确认考试已发布且包含题目')
+      router.push('/student')
+      return
+    }
     loadDraft()
     timeLeft.value = getRemainingSeconds(examData.duration_minutes, session.start_time)
     timer = setInterval(() => {
