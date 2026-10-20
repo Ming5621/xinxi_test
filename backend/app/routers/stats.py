@@ -41,12 +41,19 @@ def dashboard_stats(db: Session = Depends(get_db), current_user: User = Depends(
         User.last_seen_at >= datetime.utcnow() - timedelta(seconds=ONLINE_THRESHOLD_SECONDS),
     )
 
+    session_q = (
+        db.query(ExamSession)
+        .join(User, ExamSession.student_id == User.id)
+        .filter(ExamSession.status == SessionStatus.submitted)
+    )
+    session_q = apply_student_scope(session_q, current_user)
+
     return DashboardStats(
         total_students=student_q.count(),
         online_students=online_q.count(),
         total_exams=db.query(Exam).count(),
         active_exams=db.query(Exam).filter(Exam.status == ExamStatus.published).count(),
-        completed_sessions=db.query(ExamSession).filter(ExamSession.status == SessionStatus.submitted).count(),
+        completed_sessions=session_q.count(),
     )
 
 

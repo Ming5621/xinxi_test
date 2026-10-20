@@ -202,6 +202,19 @@ check("无meta打字题自动评分", code == 200 and result.get("total_score", 
       f"score={result.get('total_score')}")
 req("DELETE", f"/exams/{nometa_id}", token=teacher)
 
+# Bug 11: 学生不能通过 get_exam 获取答案
+code, exam = req("POST", "/exams", {
+    "title": "边界测试-答案泄露",
+    "questions": [{"type": "choice", "content": "1+1=?", "options": ["A.1","B.2","C.3","D.4"], "correct_answer": "B", "score": 10, "order_num": 0}],
+}, token=teacher)
+leak_id = exam.get("id")
+req("POST", f"/exams/{leak_id}/publish", token=teacher)
+code, student_exam = req("GET", f"/exams/{leak_id}", token=student)
+code, teacher_exam = req("GET", f"/exams/{leak_id}", token=teacher)
+check("学生看不到题目答案", code == 200 and len(student_exam.get("questions", [])) == 0)
+check("教师可查看完整题目", teacher_exam.get("questions") and teacher_exam["questions"][0].get("correct_answer") == "B")
+req("DELETE", f"/exams/{leak_id}", token=teacher)
+
 print("=" * 50)
 print(f"结果: {passed} 通过, {failed} 失败")
 if errors:

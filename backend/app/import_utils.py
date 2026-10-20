@@ -112,7 +112,7 @@ def _parse_question_type(raw: str) -> Optional[QuestionType]:
     return None
 
 
-def _normalize_answer(answer: str, qtype: QuestionType) -> str:
+def normalize_answer(answer: str, qtype: QuestionType) -> str:
     answer = answer.strip()
     if qtype == QuestionType.judge:
         if answer in {"对", "正确", "true", "t", "√", "是", "yes", "1"}:
@@ -183,7 +183,7 @@ def _parse_questions_csv(text: str, default_score: float) -> tuple[list[dict], l
             if not answer:
                 errors.append(f"第 {line_no} 行：答案不能为空")
                 continue
-            answer = _normalize_answer(answer, qtype)
+            answer = normalize_answer(answer, qtype)
 
             score = default_score
             if header_map.get("score") is not None and header_map["score"] < len(row):
@@ -291,7 +291,7 @@ def _parse_questions_block(text: str, default_score: float) -> tuple[list[dict],
             errors.append(f"第 {idx} 题：缺少答案")
             continue
 
-        answer = _normalize_answer(answer, qtype)
+        answer = normalize_answer(answer, qtype)
 
         if qtype == QuestionType.choice:
             if len(options) < 2:

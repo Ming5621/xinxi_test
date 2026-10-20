@@ -16,6 +16,7 @@ from ..models import (
     User,
 )
 from ..permissions import ensure_class_access, filter_class_name, get_assigned_classes
+from ..import_utils import normalize_answer
 from ..typing_utils import compare_text, calculate_wpm, parse_typing_config, score_typing_question, get_typing_level
 from ..schemas import (
     ExamCreate,
@@ -28,6 +29,8 @@ from ..schemas import (
     SessionDetailOut,
     SessionOut,
 )
+
+SUBMIT_GRACE_SECONDS = 30
 
 router = APIRouter(prefix="/api/exams", tags=["考试管理"])
 
@@ -71,7 +74,9 @@ def _grade_session(session: ExamSession, db: Session):
             answer.answer_meta = {**meta, "remark": remark, "level": get_typing_level(wpm)["level"]}
             total_score += score
         else:
-            is_correct = answer.student_answer.strip().upper() == question.correct_answer.strip().upper()
+            student_ans = normalize_answer(answer.student_answer, question.type)
+            correct_ans = normalize_answer(question.correct_answer, question.type)
+            is_correct = student_ans.strip().upper() == correct_ans.strip().upper()
             answer.is_correct = is_correct
             answer.score = question.score if is_correct else 0.0
             total_score += answer.score
@@ -80,7 +85,16 @@ def _grade_session(session: ExamSession, db: Session):
     session.max_score = max_score
     session.status = SessionStatus.submitted
     session.submit_time = datetime.utcnow()
-    db.commit()
+
+
+def _grade_in_progress_sessions(exam_id: int, db: Session):
+    sessions = (
+        db.query(ExamSession)
+        .filter(ExamSession.exam_id == exam_id, ExamSession.status == SessionStatus.in_progress)
+        .all()
+    )
+    for session in sessions:
+        _grade_session(session, db)
 
 
 @router.get("", response_model=list[ExamOut])
@@ -137,7 +151,11 @@ def get_exam(
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
+    if current_user.role.value == "student" and exam.status not in (ExamStatus.published, ExamStatus.ended):
+        raise HTTPException(status_code=404, detail="考试不存在")
     out = _exam_to_out(exam)
+    if current_user.role.value == "student":
+        return ExamDetailOut(**out.model_dump(), questions=[])
     return ExamDetailOut(**out.model_dump(), questions=[QuestionOut.model_validate(q) for q in exam.questions])
 
 
@@ -161,11 +179,19 @@ def update_exam(
     if data.pass_score is not None:
         exam.pass_score = data.pass_score
     if data.status is not None:
-        exam.status = data.status
-        if data.status == ExamStatus.published and not exam.start_time:
-            exam.start_time = datetime.utcnow()
-        if data.status == ExamStatus.ended and not exam.end_time:
-            exam.end_time = datetime.utcnow()
+        if data.status == ExamStatus.published:
+            if not exam.questions:
+                raise HTTPException(status_code=400, detail="考试没有题目，无法发布")
+            exam.status = ExamStatus.published
+            if not exam.start_time:
+                exam.start_time = datetime.utcnow()
+        elif data.status == ExamStatus.ended:
+            exam.status = ExamStatus.ended
+            if not exam.end_time:
+                exam.end_time = datetime.utcnow()
+            _grade_in_progress_sessions(exam_id, db)
+        else:
+            exam.status = data.status
     if data.start_time is not None:
         exam.start_time = data.start_time
     if data.end_time is not None:
@@ -225,15 +251,7 @@ def end_exam(exam_id: int, db: Session = Depends(get_db), _: User = Depends(requ
         raise HTTPException(status_code=404, detail="考试不存在")
     exam.status = ExamStatus.ended
     exam.end_time = datetime.utcnow()
-
-    sessions = (
-        db.query(ExamSession)
-        .filter(ExamSession.exam_id == exam_id, ExamSession.status == SessionStatus.in_progress)
-        .all()
-    )
-    for session in sessions:
-        _grade_session(session, db)
-
+    _grade_in_progress_sessions(exam_id, db)
     db.commit()
     return {"message": "考试已结束"}
 
@@ -340,6 +358,9 @@ def submit_exam(
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
 
+    if exam.status != ExamStatus.published:
+        raise HTTPException(status_code=400, detail="考试未开放或已结束")
+
     session = (
         db.query(ExamSession)
         .filter(ExamSession.exam_id == exam_id, ExamSession.student_id == current_user.id)
@@ -350,17 +371,33 @@ def submit_exam(
     if session.status == SessionStatus.submitted:
         raise HTTPException(status_code=400, detail="已提交，不能重复提交")
 
+    elapsed = (datetime.utcnow() - session.start_time).total_seconds()
+    max_seconds = exam.duration_minutes * 60 + SUBMIT_GRACE_SECONDS
+    if elapsed > max_seconds:
+        raise HTTPException(status_code=400, detail="考试时间已结束")
+
     db.query(Answer).filter(Answer.session_id == session.id).delete()
     question_map = {q.id: q for q in exam.questions}
+    answers_by_qid = {}
     for item in data.answers:
         if item.question_id not in question_map:
             continue
-        question = question_map[item.question_id]
+        answers_by_qid[item.question_id] = item
+
+    exam_elapsed = elapsed
+    for qid, item in answers_by_qid.items():
+        question = question_map[qid]
         meta = item.answer_meta or {}
 
         if question.type == QuestionType.typing:
             comparison = compare_text(question.content, item.student_answer)
-            duration = meta.get("duration_seconds") or max(30, len(item.student_answer))
+            config = parse_typing_config(question.options)
+            time_limit = config.get("time_limit", 120)
+            client_duration = meta.get("duration_seconds")
+            if client_duration:
+                duration = min(max(float(client_duration), 5), time_limit, exam_elapsed)
+            else:
+                duration = min(max(30, len(item.student_answer)), time_limit, exam_elapsed)
             meta = {
                 **meta,
                 "wpm": calculate_wpm(comparison["correct_chars"], duration),
@@ -371,7 +408,7 @@ def submit_exam(
 
         answer = Answer(
             session_id=session.id,
-            question_id=item.question_id,
+            question_id=qid,
             student_answer=item.student_answer,
             answer_meta=meta,
         )
@@ -379,6 +416,7 @@ def submit_exam(
 
     db.flush()
     _grade_session(session, db)
+    db.commit()
     db.refresh(session)
 
     return SessionOut(
@@ -442,8 +480,11 @@ def get_session_detail(
     if current_user.role.value == "student" and session.student_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权查看")
 
-    exam = session.exam
     student = session.student
+    if current_user.role.value == "teacher":
+        ensure_class_access(current_user, student.class_name)
+
+    exam = session.exam
     answers_out = []
     for ans in session.answers:
         q = ans.question
@@ -485,8 +526,10 @@ def list_exam_sessions(
     current_user: User = Depends(require_teacher),
 ):
     class_name = filter_class_name(current_user, class_name)
-    sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
     classes = get_assigned_classes(current_user)
     result = []
     for s in sessions:

@@ -100,7 +100,7 @@ class Question(Base):
     type = Column(Enum(QuestionType), nullable=False)
     content = Column(Text, nullable=False)
     options = Column(JSON, default=list)
-    correct_answer = Column(String(10), nullable=False)
+    correct_answer = Column(Text, nullable=False)
     score = Column(Float, default=5.0)
     order_num = Column(Integer, default=0)
 
