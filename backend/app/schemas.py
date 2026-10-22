@@ -33,11 +33,14 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str
+    # 学生姓名登录不使用密码；留空时由服务端生成随机密码
+    password: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
+    username: Optional[str] = None
     name: Optional[str] = None
+    role: Optional[UserRole] = None
     class_name: Optional[str] = None
     assigned_classes: Optional[list[str]] = None
     password: Optional[str] = None

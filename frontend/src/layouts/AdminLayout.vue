@@ -18,7 +18,7 @@
       >
         <el-menu-item index="/admin">
           <el-icon><UserFilled /></el-icon>
-          <span>教师管理</span>
+          <span>账号管理</span>
         </el-menu-item>
       </el-menu>
 
@@ -41,7 +41,7 @@
       <el-header class="top-header">
         <el-breadcrumb separator="/">
           <el-breadcrumb-item :to="{ path: '/admin' }">管理后台</el-breadcrumb-item>
-          <el-breadcrumb-item>教师账户</el-breadcrumb-item>
+          <el-breadcrumb-item>账号管理</el-breadcrumb-item>
         </el-breadcrumb>
       </el-header>
       <el-main class="main-content">
