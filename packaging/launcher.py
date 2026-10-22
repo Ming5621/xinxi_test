@@ -392,10 +392,9 @@ class LauncherApp:
         tk.Label(info, textvariable=self.url_lan, font=("Consolas", 12), fg="white", bg=self.CARD).pack(anchor="w", pady=(2, 10))
 
         hint = (
-            "默认账号\n"
-            "  管理员: admin / admin123\n"
-            "  教师: teacher / teacher123\n"
-            "  学生: student01 / 123456\n"
+            "登录说明\n"
+            "  学生：登录页输入姓名即可\n"
+            "  教师：teacher1~teacher4\n"
             f"\n日志目录: {get_data_dir()}"
         )
         tk.Label(card, text=hint, font=("Microsoft YaHei UI", 9), fg=self.MUTED, bg=self.CARD, justify="left").pack(anchor="w", pady=(8, 0))

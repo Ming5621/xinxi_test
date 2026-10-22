@@ -11,14 +11,26 @@ async function pause(page, ms = 1500) {
   await page.waitForTimeout(ms)
 }
 
-async function login(page, username, password) {
+async function teacherLogin(page, username, password) {
   await page.goto(`${BASE}/login`)
   await page.evaluate(() => localStorage.clear())
   await page.reload()
   await page.waitForLoadState('networkidle')
+  await page.locator('button.mode-btn', { hasText: '教师' }).click()
   await page.locator('input').first().fill(username)
   await page.locator('input[type="password"]').fill(password)
   await page.locator('button').filter({ hasText: '登' }).click()
+  await page.waitForLoadState('networkidle')
+  await pause(page, 1200)
+}
+
+async function studentLogin(page, name) {
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await page.waitForLoadState('networkidle')
+  await page.locator('input').first().fill(name)
+  await page.locator('button').filter({ hasText: '进入系统' }).click()
   await page.waitForLoadState('networkidle')
   await pause(page, 1200)
 }
@@ -43,10 +55,10 @@ await page.waitForLoadState('networkidle')
 await pause(page, 2000)
 
 // 2. 教师端
-await login(page, 'teacher', 'teacher123')
+await teacherLogin(page, 'teacher1', 'teacher123')
 await pause(page, 1500)
 
-await page.locator('.el-menu-item').filter({ hasText: '学生管理' }).click()
+await page.locator('.el-menu-item').filter({ hasText: '学生动态' }).click()
 await page.waitForLoadState('networkidle')
 await pause(page, 2000)
 
@@ -62,7 +74,7 @@ if (await statsBtn.count()) {
 }
 
 // 3. 学生端
-await login(page, 'student01', '123456')
+await studentLogin(page, '演示学生')
 await page.waitForURL('**/student**', { timeout: 10000 })
 await pause(page, 1500)
 

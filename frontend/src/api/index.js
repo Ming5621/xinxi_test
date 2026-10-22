@@ -14,10 +14,11 @@ api.interceptors.request.use((config) => {
 })
 
 function handleUnauthorized(error) {
-  const isLoginRequest = error.config?.url?.includes('/auth/login')
+  const url = error.config?.url || ''
+  const isLoginRequest = url.includes('/auth/login') || url.includes('/auth/student-login')
   if (isLoginRequest) {
-    const msg = error.response?.data?.detail || '用户名或密码错误'
-    ElMessage.error(typeof msg === 'string' ? msg : '用户名或密码错误')
+    const msg = error.response?.data?.detail || '登录失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '登录失败')
     return Promise.reject(error)
   }
   import('@/stores/auth').then(({ useAuthStore }) => {
@@ -63,6 +64,7 @@ async function downloadExport(path, params = {}, filename = 'export.xlsx') {
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
+  studentLogin: (data) => api.post('/auth/student-login', data),
   me: () => api.get('/auth/me'),
 }
 

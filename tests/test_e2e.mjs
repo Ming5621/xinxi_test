@@ -10,14 +10,26 @@ function check(name, cond, detail = '') {
   else { failed++; const msg = `  ✗ ${name}${detail ? ' — ' + detail : ''}`; console.log(msg); errors.push(msg) }
 }
 
-async function login(page, username, password) {
+async function teacherLogin(page, username, password) {
   await page.goto(`${BASE}/login`)
   await page.evaluate(() => localStorage.clear())
   await page.reload()
   await page.waitForLoadState('networkidle')
+  await page.locator('button.mode-btn', { hasText: '教师' }).click()
   await page.locator('input').first().fill(username)
   await page.locator('input[type="password"]').fill(password)
   await page.locator('button').filter({ hasText: '登' }).click()
+  await page.waitForTimeout(1500)
+}
+
+async function studentLogin(page, name) {
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await page.waitForLoadState('networkidle')
+  // 默认即为学生模式
+  await page.locator('input').first().fill(name)
+  await page.locator('button').filter({ hasText: '进入系统' }).click()
   await page.waitForTimeout(1500)
 }
 
@@ -36,16 +48,21 @@ page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text(
 // 1. 登录页
 await page.goto(`${BASE}/login`)
 check('登录页加载', await page.locator('h1').textContent().then(t => t.includes('考试系统')))
+check('无账号提示文案', !(await page.content()).includes('student01') && !(await page.content()).includes('teacher123'))
+check('默认学生模式', await page.locator('button.mode-btn.active').textContent().then(t => t.includes('学生')))
 
 // 2. 教师登录
-await login(page, 'teacher', 'teacher123')
+await teacherLogin(page, 'teacher1', 'teacher123')
 check('教师跳转控制台', page.url().includes('/teacher'))
 
-// 3. 学生管理
+// 控制台应有在线学生区
+check('控制台含在线学生', await page.locator('text=当前在线学生').count() >= 1)
+check('控制台含发任务', await page.locator('text=发任务').count() >= 1)
+
+// 3. 学生动态
 await page.goto(`${BASE}/teacher/students`)
 await page.waitForTimeout(800)
-check('学生管理页加载', await page.locator('h1').textContent().then(t => t.includes('学生管理')))
-check('学生列表有数据', await page.locator('.el-table__row').count() >= 1)
+check('学生动态页加载', await page.locator('h1').textContent().then(t => t.includes('学生')))
 
 // 4. 考试管理
 await page.goto(`${BASE}/teacher/exams`)
@@ -76,8 +93,8 @@ await page.goto(`${BASE}/teacher/typing`)
 await page.waitForTimeout(800)
 check('教师打字统计页', await page.locator('h1').textContent().then(t => t.includes('打字')))
 
-// 8. 学生端
-await login(page, 'student01', '123456')
+// 8. 学生端姓名登录
+await studentLogin(page, 'E2E测试生')
 check('学生跳转', page.url().includes('/student'))
 
 // 9. 考试大厅
@@ -133,11 +150,14 @@ await page.goto(`${BASE}/student/results`)
 await page.waitForTimeout(800)
 check('我的成绩页加载', await page.locator('h1').textContent().then(t => t.includes('成绩')))
 
-// 13. 控制台错误检查
-const realErrors = consoleErrors.filter(e =>
-  !e.includes('favicon') && !e.includes('404') && !e.includes('is not a function') === false
-)
-// Filter out known non-critical
+// 13. 教师端应能看到该学生在线
+await teacherLogin(page, 'teacher1', 'teacher123')
+await page.goto(`${BASE}/teacher`)
+await page.waitForTimeout(1000)
+const onlineText = await page.locator('.content-card').first().textContent()
+check('教师端可见姓名登录学生', onlineText.includes('E2E测试生') || (await page.locator('text=E2E测试生').count()) >= 1)
+
+// 14. 控制台错误检查
 const criticalErrors = consoleErrors.filter(e =>
   e.includes('TypeError') || e.includes('ReferenceError') || e.includes('is not a function')
 )

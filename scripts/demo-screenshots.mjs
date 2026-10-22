@@ -29,7 +29,7 @@ await page.waitForLoadState('networkidle')
 await shot(page, '01-login')
 
 // 2. 教师端
-await login(page, 'teacher', 'teacher123')
+await teacherLogin(page, 'teacher1', 'teacher123')
 await shot(page, '02-teacher-dashboard')
 
 await page.click('text=学生管理')
@@ -53,7 +53,7 @@ if (await statsBtn.count()) {
 
 // 3. 学生端
 await page.goto(`${BASE}/login`)
-await login(page, 'student01', '123456')
+await studentLogin(page, '演示学生')
 await shot(page, '06-student-dashboard')
 
 await page.click('text=我的成绩')

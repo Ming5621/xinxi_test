@@ -20,13 +20,22 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isStudent = computed(() => user.value?.role === 'student')
 
-  async function login(username, password) {
-    const res = await authApi.login({ username, password })
+  function applySession(res) {
     token.value = res.access_token
     user.value = res.user
     localStorage.setItem('token', res.access_token)
     localStorage.setItem('user', JSON.stringify(res.user))
     return res.user
+  }
+
+  async function login(username, password) {
+    const res = await authApi.login({ username, password })
+    return applySession(res)
+  }
+
+  async function studentLogin(name, className = '课堂') {
+    const res = await authApi.studentLogin({ name, class_name: className })
+    return applySession(res)
   }
 
   function logout() {
@@ -36,5 +45,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('user')
   }
 
-  return { token, user, isLoggedIn, isTeacher, isAdmin, isStudent, login, logout }
+  return { token, user, isLoggedIn, isTeacher, isAdmin, isStudent, login, studentLogin, logout }
 })

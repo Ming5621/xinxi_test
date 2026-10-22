@@ -50,10 +50,17 @@ def login(username, password):
     return None, None
 
 
+def student_login(name, class_name="课堂"):
+    code, data = req("POST", "/auth/student-login", {"name": name, "class_name": class_name})
+    if code == 200:
+        return data["access_token"], data["user"]
+    return None, None
+
+
 print("=" * 50)
 
 # 清理上次测试残留
-_teacher_token, _ = login("teacher", "teacher123")
+_teacher_token, _ = login("teacher1", "teacher123")
 if _teacher_token:
     for username in ["test_student_99", "test_import01", "test_import02", "test_cross_class"]:
         code, users = req("GET", "/users?role=student", token=_teacher_token)
@@ -70,13 +77,37 @@ code, data = req("GET", "/health")
 check("健康检查", code == 200 and data.get("status") == "ok", str(data))
 
 # 2. 登录
-teacher_token, teacher = login("teacher", "teacher123")
-student_token, student = login("student01", "123456")
+teacher_token, teacher = login("teacher1", "teacher123")
+student_token, student = student_login("测试生甲")
 check("教师登录", teacher_token and teacher["role"] == "teacher")
-check("学生登录", student_token and student["role"] == "student")
+check("学生姓名登录", student_token and student["role"] == "student" and student["name"] == "测试生甲")
+check("学生默认班级为课堂", student and student.get("class_name") == "课堂")
 
-code, _ = req("POST", "/auth/login", {"username": "teacher", "password": "wrong"})
+# 同名再次登录应复用账号
+token2, student2_same = student_login("测试生甲")
+check("同名学生复用账号", token2 and student2_same["id"] == student["id"])
+
+code, _ = req("POST", "/auth/login", {"username": "teacher1", "password": "wrong"})
 check("错误密码拒绝", code == 401)
+
+code, detail = req("POST", "/auth/login", {"username": student["username"], "password": "x"})
+check("学生密码登录被拒绝", code == 400, str(detail))
+
+code, _ = req("POST", "/auth/student-login", {"name": "  "})
+check("空姓名拒绝", code == 400)
+
+# 四个教师账号均可登录
+for i in range(1, 5):
+    t, u = login(f"teacher{i}", "teacher123")
+    check(f"教师 teacher{i} 登录", t and u["role"] == "teacher")
+
+# 额外姓名登录，保证在线/统计人数足够
+extra_students = []
+for name in ["测试生乙", "测试生丙", "测试生丁", "测试生戊"]:
+    tok, usr = student_login(name)
+    if tok:
+        extra_students.append((tok, usr))
+check("批量姓名登录", len(extra_students) == 4)
 
 # 3. 用户管理
 code, users = req("GET", "/users?role=student", token=teacher_token)
@@ -87,7 +118,7 @@ code, new_user = req("POST", "/users", {
     "name": "测试学生",
     "password": "123456",
     "role": "student",
-    "class_name": "微机1班",
+    "class_name": "课堂",
 }, token=teacher_token)
 check("创建学生", code == 200 and new_user.get("username") == "test_student_99")
 
@@ -96,6 +127,7 @@ code, _ = req("POST", "/users", {
     "name": "重复",
     "password": "123456",
     "role": "student",
+    "class_name": "课堂",
 }, token=teacher_token)
 check("重复用户名拒绝", code == 400)
 
@@ -103,7 +135,7 @@ admin_token, admin = login("admin", "admin123")
 check("管理员登录", admin_token and admin["role"] == "admin")
 
 code, teachers = req("GET", "/users?role=teacher", token=admin_token)
-check("管理员查看教师列表", code == 200 and len(teachers) >= 1)
+check("管理员查看教师列表", code == 200 and len(teachers) >= 4)
 
 code, classes = req("GET", "/classes", token=teacher_token)
 check("教师获取班级列表", code == 200 and "classes" in classes)
@@ -122,7 +154,7 @@ check("教师无法查看教师列表", code == 403)
 
 # 4. 批量导入
 code, result = req("POST", "/import/students", {
-    "text": "test_import01,导入一,微机1班,123456\ntest_import02,导入二,微机2班,",
+    "text": "test_import01,导入一,课堂,123456\ntest_import02,导入二,微机2班,",
     "default_password": "123456",
 }, token=teacher_token)
 check("批量导入学生", code == 200 and result.get("success_count", 0) >= 1, str(result))
@@ -242,7 +274,7 @@ check("教师打字统计", code == 200)
 
 code, class_stats_filtered = req(
     "GET",
-    f"/typing/records/stats?{urllib.parse.urlencode({'class_name': '微机1班'})}",
+    f"/typing/records/stats?{urllib.parse.urlencode({'class_name': '课堂'})}",
     token=teacher_token,
 )
 check("按班级打字统计", code == 200)
@@ -251,7 +283,7 @@ check("按班级打字统计", code == 200)
 if texts:
     code, typing_session = req("POST", "/typing/sessions", {
         "text_id": texts[0]["id"],
-        "class_name": "微机1班",
+        "class_name": "课堂",
         "title": "自动化课堂测试",
         "duration_seconds": 300,
     }, token=teacher_token)
