@@ -282,6 +282,20 @@ class TypingTextUpdate(BaseModel):
     time_limit: Optional[int] = None
 
 
+class TypingTextImportRequest(BaseModel):
+    text: str
+    title: str = ""
+    difficulty: TypingDifficulty = TypingDifficulty.basic
+    time_limit: int = 120
+
+
+class TypingTextImportResult(BaseModel):
+    success_count: int
+    fail_count: int
+    errors: list[str] = []
+    texts: list[TypingTextOut] = []
+
+
 class TypingSubmitRequest(BaseModel):
     text_id: Optional[int] = None
     typing_session_id: Optional[int] = None

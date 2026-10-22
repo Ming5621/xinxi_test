@@ -44,9 +44,10 @@
           <ClassFilter v-model="createForm.class_name" placeholder="选择班级" :clearable="false" style="width: 100%" />
         </el-form-item>
         <el-form-item label="练习文章" prop="text_id">
-          <el-select v-model="createForm.text_id" placeholder="选择文章" style="width: 100%">
+          <el-select v-model="createForm.text_id" placeholder="选择文章" style="width: 100%" no-data-text="暂无练习文章">
             <el-option v-for="t in texts" :key="t.id" :label="`${t.title}（${t.content.length}字）`" :value="t.id" />
           </el-select>
+          <el-button link type="primary" @click="$router.push('/teacher/typing')">去导入或管理文章</el-button>
         </el-form-item>
         <el-form-item label="测试名称">
           <el-input v-model="createForm.title" placeholder="可选，默认自动生成" />

@@ -1,10 +1,12 @@
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import get_current_user, require_student, require_teacher
 from ..database import get_db
+from ..import_utils import MAX_TYPING_ARTICLES, decode_uploaded_text, parse_typing_articles
 from ..models import (
     TypingClassSession,
     TypingClassSessionStatus,
@@ -30,6 +32,8 @@ from ..schemas import (
     TypingStandardsOut,
     TypingSubmitRequest,
     TypingTextCreate,
+    TypingTextImportRequest,
+    TypingTextImportResult,
     TypingTextOut,
     TypingTextUpdate,
 )
@@ -177,6 +181,120 @@ def delete_text(
     text.is_active = False
     db.commit()
     return {"message": "已删除"}
+
+
+_TEXT_FILE_SUFFIXES = {".txt", ".csv", ".tsv", ".text"}
+_MAX_IMPORT_BYTES = 2 * 1024 * 1024
+
+
+def _check_import_time_limit(time_limit: int) -> None:
+    if time_limit < 30 or time_limit > 600:
+        raise HTTPException(status_code=400, detail="建议时长需在 30 到 600 秒之间")
+
+
+def _filename_stem(filename: str | None) -> str:
+    name = Path(filename or "").name
+    if not name:
+        return ""
+    return Path(name).stem.strip()
+
+
+def _save_imported_articles(
+    db: Session,
+    owner: User,
+    text: str,
+    default_title: str,
+    difficulty: TypingDifficulty,
+    time_limit: int,
+) -> TypingTextImportResult:
+    _check_import_time_limit(time_limit)
+    articles, errors = parse_typing_articles(
+        text,
+        default_title=default_title,
+        default_difficulty=difficulty,
+        default_time_limit=time_limit,
+    )
+    if len(articles) > MAX_TYPING_ARTICLES:
+        extra = len(articles) - MAX_TYPING_ARTICLES
+        errors.append(f"一次最多导入 {MAX_TYPING_ARTICLES} 篇，已忽略其余 {extra} 篇")
+        articles = articles[:MAX_TYPING_ARTICLES]
+
+    created_ids: list[int] = []
+    for item in articles:
+        row = TypingText(
+            teacher_id=owner.id,
+            title=item["title"],
+            content=item["content"],
+            difficulty=item["difficulty"],
+            char_count=len(item["content"]),
+            time_limit=item["time_limit"],
+        )
+        db.add(row)
+        db.flush()
+        created_ids.append(row.id)
+    db.commit()
+
+    rows: list[TypingText] = []
+    if created_ids:
+        rows = (
+            db.query(TypingText)
+            .options(joinedload(TypingText.teacher))
+            .filter(TypingText.id.in_(created_ids))
+            .order_by(TypingText.id)
+            .all()
+        )
+    return TypingTextImportResult(
+        success_count=len(rows),
+        fail_count=len(errors),
+        errors=errors,
+        texts=[_text_to_out(row) for row in rows],
+    )
+
+
+@router.post("/texts/import", response_model=TypingTextImportResult)
+def import_texts(
+    data: TypingTextImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    """粘贴导入一篇或多篇打字文章，归属当前教师。"""
+    return _save_imported_articles(
+        db,
+        current_user,
+        data.text,
+        data.title.strip(),
+        data.difficulty,
+        data.time_limit,
+    )
+
+
+@router.post("/texts/import/file", response_model=TypingTextImportResult)
+async def import_texts_file(
+    file: UploadFile = File(...),
+    title: str = "",
+    difficulty: TypingDifficulty = TypingDifficulty.basic,
+    time_limit: int = 120,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    """上传 txt / csv / tsv 导入打字文章。纯文本文件名作为单篇标题。"""
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix and suffix not in _TEXT_FILE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 .txt / .csv / .tsv 文件")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件内容为空")
+    if len(raw) > _MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=400, detail="文件不能超过 2MB")
+    try:
+        text = decode_uploaded_text(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    default_title = title.strip() or _filename_stem(filename)
+    return _save_imported_articles(db, current_user, text, default_title, difficulty, time_limit)
 
 
 def _session_to_out(session: TypingClassSession, db: Session) -> TypingClassSessionOut:

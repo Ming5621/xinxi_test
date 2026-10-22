@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 from app.typing_utils import compare_text, calculate_wpm, score_typing_question, get_typing_level
-from app.import_utils import parse_students_text, parse_questions_text
+from app.import_utils import decode_uploaded_text, parse_students_text, parse_questions_text, parse_typing_articles
 
 passed = 0
 failed = 0
@@ -70,6 +70,42 @@ D. 4
 分值：10"""
 qs2, _ = parse_questions_text(block)
 check("题目块解析", len(qs2) == 1 and qs2[0]["correct_answer"] == "B")
+
+# 打字文章导入
+block_articles = """【标题】春晓
+【难度】入门
+【时长】60
+
+春眠不觉晓，处处闻啼鸟。
+
+【标题】静夜思
+床前明月光，疑是地上霜。
+"""
+articles, art_errs = parse_typing_articles(block_articles)
+check(
+    "文章分段导入",
+    len(articles) == 2 and not art_errs and articles[0]["title"] == "春晓"
+    and articles[0]["difficulty"].value == "beginner" and articles[0]["time_limit"] == 60
+    and "春眠不觉晓" in articles[0]["content"] and articles[1]["difficulty"].value == "basic",
+    str(articles) + str(art_errs),
+)
+
+csv_articles, csv_errs = parse_typing_articles("标题,正文,难度,建议时长\n静夜思,\"床前明月光，疑是地上霜。\",进阶,90\n,空标题,基础,60")
+check(
+    "文章表格导入",
+    len(csv_articles) == 1 and csv_articles[0]["difficulty"].value == "advanced" and csv_articles[0]["time_limit"] == 90
+    and any("标题不能为空" in e for e in csv_errs),
+    str(csv_articles) + str(csv_errs),
+)
+
+single, single_errs = parse_typing_articles("信息技术改变生活。", default_title="单篇练习")
+check("文章单篇导入", len(single) == 1 and single[0]["title"] == "单篇练习" and not single_errs)
+
+missing, missing_errs = parse_typing_articles("只有正文没有标题")
+check("文章缺少标题", not missing and missing_errs)
+
+gbk = decode_uploaded_text("春眠不觉晓".encode("gbk"))
+check("文章 GBK 解码", gbk == "春眠不觉晓")
 
 print("-" * 40)
 print(f"结果: {passed} 通过, {failed} 失败")

@@ -425,9 +425,93 @@ if test_exam_id:
     code, _ = req("DELETE", f"/exams/{test_exam_id}", token=teacher_token)
     check("删除测试考试", code == 200)
 
+def multipart_req(path, fields, file_field, filename, content, token, mime="text/plain"):
+    boundary = "----ExamBoundary7d3a"
+    body = bytearray()
+    for key, val in fields.items():
+        body.extend(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{val}\r\n".encode()
+        )
+    payload = content if isinstance(content, bytes) else content.encode("utf-8")
+    body.extend(
+        (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\n"
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode()
+    )
+    body.extend(payload)
+    body.extend(f"\r\n--{boundary}--\r\n".encode())
+    request = urllib.request.Request(
+        f"{BASE}{path}",
+        data=bytes(body),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            detail = json.loads(raw)
+        except Exception:
+            detail = raw
+        return e.code, detail
+
+
 # 9. 打字练习
+code, teacher_texts = req("GET", "/typing/texts", token=teacher_token)
+if code == 200:
+    for old in teacher_texts:
+        if str(old.get("title", "")).startswith("API导入"):
+            req("DELETE", f"/typing/texts/{old['id']}", token=teacher_token)
+
 code, texts = req("GET", "/typing/texts", token=student_token)
 check("获取打字素材", code == 200 and len(texts) >= 1)
+
+code, imported = req("POST", "/typing/texts/import", {
+    "title": "",
+    "difficulty": "basic",
+    "time_limit": 120,
+    "text": "【标题】API导入春晓\n【难度】入门\n【时长】60\n春眠不觉晓，处处闻啼鸟。\n\n【标题】API导入静夜思\n床前明月光，疑是地上霜。",
+}, token=teacher_token)
+imported_ids = {item["id"] for item in (imported.get("texts") or [])} if code == 200 else set()
+check("教师导入文章", code == 200 and imported.get("success_count") == 2, str(imported))
+
+code, student_texts = req("GET", "/typing/texts", token=student_token)
+student_ids = {item["id"] for item in student_texts} if code == 200 else set()
+check("学生可见导入文章", code == 200 and imported_ids <= student_ids, str(student_texts)[:300])
+
+code, denied = req("POST", "/typing/texts/import", {"text": "不能导入", "title": "API导入越权"}, token=student_token)
+check("学生不能导入文章", code == 403, str(denied))
+
+code, file_imported = multipart_req(
+    "/typing/texts/import/file?difficulty=basic&time_limit=90",
+    {},
+    "file",
+    "API导入文件.txt",
+    "信息技术课程帮助我们学习与交流。".encode("gbk"),
+    teacher_token,
+)
+file_rows = (file_imported.get("texts") or []) if isinstance(file_imported, dict) else []
+file_ids = {item["id"] for item in file_rows} if code == 200 else set()
+check(
+    "教师上传文本导入文章",
+    code == 200 and isinstance(file_imported, dict) and file_imported.get("success_count") == 1
+    and file_rows and file_rows[0].get("title") == "API导入文件",
+    str(file_imported),
+)
+imported_ids |= file_ids
+for tid in imported_ids:
+    code, _ = req("DELETE", f"/typing/texts/{tid}", token=teacher_token)
+check("教师删除导入文章", imported_ids and code == 200)
+code, student_texts = req("GET", "/typing/texts", token=student_token)
+left = {item["id"] for item in student_texts} if code == 200 else set()
+check("删除后学生不可见导入文章", code == 200 and imported_ids.isdisjoint(left))
 
 code, standards = req("GET", "/typing/standards", token=student_token)
 check("获取打字标准", code == 200 and len(standards.get("levels", [])) >= 5)
