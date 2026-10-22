@@ -82,7 +82,7 @@ def write_log(msg: str) -> None:
 def get_local_ip() -> str:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(1.0)
+        s.settimeout(0.5)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
@@ -102,7 +102,7 @@ def health_url(port: int) -> str:
     return f"http://127.0.0.1:{port}/api/health"
 
 
-def check_health(port: int, timeout: float = 0.8) -> bool:
+def check_health(port: int, timeout: float = 0.25) -> bool:
     try:
         with urllib.request.urlopen(health_url(port), timeout=timeout) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
@@ -111,15 +111,30 @@ def check_health(port: int, timeout: float = 0.8) -> bool:
         return False
 
 
-def wait_for_health(port: int, timeout: float = 45.0, proc: subprocess.Popen | None = None) -> bool:
+def wait_for_health(
+    port: int,
+    timeout: float = 60.0,
+    proc: subprocess.Popen | None = None,
+    on_tick=None,
+) -> bool:
     deadline = time.time() + timeout
+    started = time.time()
+    last_tick = -1
     while time.time() < deadline:
         if proc is not None and proc.poll() is not None:
             write_log(f"server process exited early code={proc.returncode}")
             return False
-        if check_health(port):
+        if check_health(port, timeout=0.35):
+            write_log(f"health ok after {time.time() - started:.2f}s")
             return True
-        time.sleep(0.25)
+        elapsed = int(time.time() - started)
+        if on_tick is not None and elapsed != last_tick:
+            last_tick = elapsed
+            try:
+                on_tick(elapsed, int(timeout))
+            except Exception:
+                pass
+        time.sleep(0.2)
     return False
 
 
@@ -129,6 +144,7 @@ def is_port_free(port: int) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.settimeout(0.2)
                 s.bind((host, port))
         except OSError:
             return False
@@ -136,24 +152,39 @@ def is_port_free(port: int) -> bool:
 
 
 def choose_port(preferred: int | None = None) -> int:
-    """选择空闲端口；若该端口已是本系统健康服务则直接复用。"""
-    candidates: list[int] = []
-    if preferred:
-        candidates.append(preferred)
-    candidates.extend(PREFERRED_PORTS)
-    # 再追加一段连续端口作为兜底
-    candidates.extend(range(18775, 18820))
+    """选择空闲端口；若占用端口已是本系统健康服务则直接复用。
 
+    旧逻辑对每个占用端口先做 HTTP 健康检查（超时 ~0.8s），教室环境端口被占时会假死数秒到数十秒。
+    现改为：优先端口上「空闲则用 / 占用则短超时看是否可复用」；扩展段只做 bind，不再 HTTP。
+    """
+    primary: list[int] = []
+    if preferred:
+        primary.append(preferred)
+    primary.extend(PREFERRED_PORTS)
+
+    extended = list(range(18775, 18820))
+    t0 = time.time()
     seen: set[int] = set()
-    for port in candidates:
+
+    for port in primary:
         if port in seen or port < 1024 or port > 65535:
             continue
         seen.add(port)
-        if check_health(port):
-            write_log(f"reuse healthy port {port}")
-            return port
         if is_port_free(port):
-            write_log(f"selected free port {port}")
+            write_log(f"selected free port {port} in {time.time() - t0:.3f}s")
+            return port
+        # 占用时才短超时探测，避免空闲端口也走 HTTP
+        if check_health(port, timeout=0.08):
+            write_log(f"reuse healthy port {port} in {time.time() - t0:.3f}s")
+            return port
+        write_log(f"port busy {port}")
+
+    for port in extended:
+        if port in seen or port < 1024 or port > 65535:
+            continue
+        seen.add(port)
+        if is_port_free(port):
+            write_log(f"selected free port {port} in {time.time() - t0:.3f}s")
             return port
         write_log(f"port busy {port}")
     raise RuntimeError("未找到可用端口，请关闭占用程序后重试")
@@ -176,7 +207,9 @@ def setup_environment():
 
 
 def init_database():
-    import seed  # noqa: F401
+    import seed
+
+    seed.run_seed(quiet=True)
 
 
 def open_firewall_port(port: int) -> None:
@@ -464,6 +497,7 @@ class LauncherApp:
 
     def _bootstrap(self):
         try:
+            t_boot = time.time()
             write_log("gui bootstrap start")
             env_port = os.environ.get("EXAM_PORT")
             preferred = int(env_port) if env_port else None
@@ -474,7 +508,7 @@ class LauncherApp:
             self.root.after(0, self.refresh_urls)
             write_log(f"chosen port={self.port} ip={self.local_ip}")
 
-            if check_health(self.port):
+            if check_health(self.port, timeout=0.35):
                 self.root.after(0, lambda: self._mark_ready(reused=True))
                 return
 
@@ -482,13 +516,20 @@ class LauncherApp:
             get_data_dir()
             setup_environment()
 
-            self.root.after(0, lambda: self.set_status(f"正在放行防火墙端口 {self.port}..."))
-            open_firewall_port(self.port)
-
+            # 先拉起服务进程，防火墙放行并行进行，避免 netsh 阻塞服务启动
             self.root.after(0, lambda: self.set_status(f"正在启动服务（端口 {self.port}）..."))
             proc = start_server_process(self.port)
+            threading.Thread(target=open_firewall_port, args=(self.port,), daemon=True).start()
 
-            if not wait_for_health(self.port, timeout=50.0, proc=proc):
+            def on_tick(elapsed: int, total: int):
+                self.root.after(
+                    0,
+                    lambda: self.set_status(
+                        f"正在启动服务（端口 {self.port}）… 已等待 {elapsed}s / {total}s"
+                    ),
+                )
+
+            if not wait_for_health(self.port, timeout=75.0, proc=proc, on_tick=on_tick):
                 # 读一点服务日志便于提示
                 server_log = get_data_dir() / "server.log"
                 tail = ""
@@ -503,7 +544,7 @@ class LauncherApp:
                     f"{tail}"
                 )
 
-            write_log(f"health ok port={self.port}")
+            write_log(f"health ok port={self.port} bootstrap={time.time() - t_boot:.2f}s")
             self.root.after(0, lambda: self._mark_ready(reused=False))
         except Exception as e:
             write_log(f"bootstrap failed: {e}\n{traceback.format_exc()}")
@@ -526,9 +567,13 @@ class LauncherApp:
 
 def serve_main(port: int) -> int:
     try:
+        t0 = time.time()
         setup_environment()
+        write_log(f"serve setup done {time.time() - t0:.2f}s")
         init_database()
-        open_firewall_port(port)
+        write_log(f"serve db ready {time.time() - t0:.2f}s")
+        # 防火墙已在 GUI 侧并行处理；此处再兜底一次（短超时）
+        threading.Thread(target=open_firewall_port, args=(port,), daemon=True).start()
         run_server_foreground(port)
         return 0
     except Exception as e:
@@ -553,7 +598,7 @@ def main() -> int:
                 time.sleep(3600)
         open_firewall_port(port)
         proc = start_server_process(port)
-        if wait_for_health(port, timeout=50.0, proc=proc):
+        if wait_for_health(port, timeout=75.0, proc=proc):
             webbrowser.open(f"http://127.0.0.1:{port}")
             try:
                 proc.wait()
