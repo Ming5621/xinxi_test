@@ -17,15 +17,17 @@
       >{{ char === ' ' ? '\u00A0' : char }}</span>
     </div>
 
-    <textarea
-      ref="inputRef"
-      v-model="typedText"
-      class="input-box"
-      :disabled="!started || finished || paused"
-      :placeholder="started ? '请开始输入...' : '点击左侧「开始打字」后在此输入'"
-      @input="onInput"
-      @keydown="onKeydown"
-    />
+    <div class="input-wrap">
+      <textarea
+        ref="inputRef"
+        v-model="typedText"
+        class="input-box"
+        :disabled="!started || finished || paused"
+        :placeholder="started ? '请开始输入...' : '开始后在此输入'"
+        @input="onInput"
+        @keydown="onKeydown"
+      />
+    </div>
 
     <div class="actions" v-if="!hideControls">
       <template v-if="!started && !finished">
@@ -309,7 +311,10 @@ defineExpose({ reset, start, pause, resume, stop, started, finished, paused, res
 
 .typing-panel.expanded {
   flex: 1;
-  gap: 14px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  gap: 12px;
 }
 
 .status-bar {
@@ -338,24 +343,37 @@ defineExpose({ reset, start, pause, resume, stop, started, finished, paused, res
   letter-spacing: 1px;
   min-height: 140px;
   max-height: 280px;
+  overflow-x: hidden;
   overflow-y: auto;
+  overflow-wrap: anywhere;
   color: #374151;
 }
 
 .typing-panel.expanded .article-box {
-  flex: 1.15;
-  min-height: 260px;
+  flex: 1 1 0;
+  min-height: 0;
   max-height: none;
-  padding: 28px 32px;
-  font-size: 24px;
-  line-height: 2.15;
-  letter-spacing: 1.5px;
+  padding: 16px 20px;
+  font-size: 22px;
+  line-height: 1.9;
+  letter-spacing: 0.5px;
 }
 
 .char.idle { color: #9ca3af; }
 .char.current { color: #111827; background: #fef08a; border-radius: 2px; }
 .char.ok { color: #16a34a; }
 .char.err { color: #dc2626; background: #fee2e2; border-radius: 2px; }
+
+.input-wrap {
+  display: flex;
+  min-width: 0;
+}
+
+.typing-panel.expanded .input-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+}
 
 .input-box {
   width: 100%;
@@ -370,15 +388,29 @@ defineExpose({ reset, start, pause, resume, stop, started, finished, paused, res
   outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
+  overflow-wrap: anywhere;
 }
 
 .typing-panel.expanded .input-box {
-  flex: 1;
-  min-height: 220px;
-  padding: 24px 28px;
-  font-size: 24px;
-  line-height: 2;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 16px 20px;
+  font-size: 22px;
+  line-height: 1.9;
   resize: none;
+  overflow-y: auto;
+}
+
+@media (max-height: 800px) {
+  .typing-panel.expanded .article-box,
+  .typing-panel.expanded .input-box {
+    font-size: 18px;
+    line-height: 1.75;
+    padding: 12px 16px;
+  }
 }
 
 .input-box:focus { border-color: #4f46e5; }

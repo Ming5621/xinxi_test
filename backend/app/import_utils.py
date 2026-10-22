@@ -4,7 +4,7 @@ import io
 import re
 from typing import Optional
 
-from .models import QuestionType
+from .models import QuestionType, TypingDifficulty
 
 
 STUDENT_HEADERS = {
@@ -310,3 +310,254 @@ def _parse_questions_block(text: str, default_score: float) -> tuple[list[dict],
         })
 
     return questions, errors
+
+
+TYPING_CSV_HEADERS = {
+    "title": {"标题", "title", "文章", "篇名", "文章标题"},
+    "content": {"正文", "content", "内容", "文章内容", "练习正文"},
+    "difficulty": {"难度", "difficulty"},
+    "time_limit": {"建议时长", "时长", "time_limit", "建议时长(秒)", "秒"},
+}
+
+_TYPING_DIFFICULTY = {
+    "入门": TypingDifficulty.beginner,
+    "初级": TypingDifficulty.beginner,
+    "beginner": TypingDifficulty.beginner,
+    "基础": TypingDifficulty.basic,
+    "basic": TypingDifficulty.basic,
+    "达标": TypingDifficulty.standard,
+    "标准": TypingDifficulty.standard,
+    "standard": TypingDifficulty.standard,
+    "进阶": TypingDifficulty.advanced,
+    "高级": TypingDifficulty.advanced,
+    "advanced": TypingDifficulty.advanced,
+}
+
+_TITLE_RE = re.compile(r"^【标题】\s*[:：]?\s*(.*)$")
+_DIFF_RE = re.compile(r"^【难度】\s*[:：]?\s*(.*)$")
+_TIME_RE = re.compile(r"^【时长】\s*[:：]?\s*(.*)$")
+
+MAX_TYPING_ARTICLES = 100
+MAX_TYPING_CONTENT = 20000
+MAX_TYPING_TITLE = 200
+
+
+def decode_uploaded_text(content: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "gbk", "gb2312"):
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("文件编码无法识别，请使用 UTF-8 或 GBK 编码")
+
+
+def _parse_typing_difficulty(raw: str, default: TypingDifficulty) -> tuple[Optional[TypingDifficulty], Optional[str]]:
+    text = (raw or "").strip().lower()
+    if not text:
+        return default, None
+    value = _TYPING_DIFFICULTY.get(text)
+    if value is None:
+        return None, f"难度无效（{raw.strip()}），可选：入门、基础、达标、进阶"
+    return value, None
+
+
+def _parse_typing_time_limit(raw: str, default: int) -> tuple[Optional[int], Optional[str]]:
+    text = re.sub(r"秒$", "", (raw or "").strip())
+    if not text:
+        return default, None
+    if not text.isdigit():
+        return None, f"时长无效（{raw.strip()}）"
+    value = int(text)
+    if value < 30 or value > 600:
+        return None, "建议时长需在 30 到 600 秒之间"
+    return value, None
+
+
+def _typing_article(title: str, content: str, difficulty: TypingDifficulty, time_limit: int) -> dict:
+    return {
+        "title": title.strip()[:MAX_TYPING_TITLE],
+        "content": content.strip(),
+        "difficulty": difficulty,
+        "time_limit": time_limit,
+    }
+
+
+def _looks_like_typing_csv(text: str) -> bool:
+    first = next((ln for ln in text.split("\n") if ln.strip()), "")
+    if not first or "【标题】" in first:
+        return False
+    delimiter = "\t" if "\t" in first else ("," if "," in first else None)
+    if not delimiter:
+        return False
+    try:
+        headers = next(csv.reader([first], delimiter=delimiter))
+    except csv.Error:
+        return False
+    mapped = _map_headers(headers, TYPING_CSV_HEADERS)
+    return "title" in mapped and "content" in mapped
+
+
+def _parse_typing_csv(
+    text: str,
+    default_difficulty: TypingDifficulty,
+    default_time_limit: int,
+) -> tuple[list[dict], list[str]]:
+    first = next((ln for ln in text.split("\n") if ln.strip()), "")
+    delimiter = "\t" if "\t" in first else ","
+    rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+    if not rows:
+        return [], ["无法解析表格"]
+
+    header_map = _map_headers(rows[0], TYPING_CSV_HEADERS)
+    articles: list[dict] = []
+    errors: list[str] = []
+
+    for line_no, row in enumerate(rows[1:], start=2):
+        if not row or all(not cell.strip() for cell in row):
+            continue
+        title = row[header_map["title"]].strip() if header_map["title"] < len(row) else ""
+        content = row[header_map["content"]].strip() if header_map["content"] < len(row) else ""
+        if not title:
+            errors.append(f"第 {line_no} 行：标题不能为空")
+            continue
+        if len(title) > MAX_TYPING_TITLE:
+            errors.append(f"第 {line_no} 行：标题不能超过 {MAX_TYPING_TITLE} 字")
+            continue
+        if not content:
+            errors.append(f"第 {line_no} 行：正文不能为空")
+            continue
+        if len(content) > MAX_TYPING_CONTENT:
+            errors.append(f"第 {line_no} 行：正文过长（上限 {MAX_TYPING_CONTENT} 字）")
+            continue
+
+        difficulty = default_difficulty
+        if header_map.get("difficulty") is not None and header_map["difficulty"] < len(row):
+            difficulty, err = _parse_typing_difficulty(row[header_map["difficulty"]], default_difficulty)
+            if err:
+                errors.append(f"第 {line_no} 行：{err}")
+                continue
+        time_limit = default_time_limit
+        if header_map.get("time_limit") is not None and header_map["time_limit"] < len(row):
+            time_limit, err = _parse_typing_time_limit(row[header_map["time_limit"]], default_time_limit)
+            if err:
+                errors.append(f"第 {line_no} 行：{err}")
+                continue
+        articles.append(_typing_article(title, content, difficulty, time_limit))
+
+    return articles, errors
+
+
+def _parse_typing_blocks(
+    text: str,
+    default_difficulty: TypingDifficulty,
+    default_time_limit: int,
+) -> tuple[list[dict], list[str]]:
+    articles: list[dict] = []
+    errors: list[str] = []
+    current: Optional[dict] = None
+    body: list[str] = []
+    saw_leading = False
+
+    def flush() -> None:
+        nonlocal current, body
+        if current is None:
+            return
+        title = (current.get("title") or "").strip()
+        content = "\n".join(body).strip()
+        label = f"第 {current['index']} 篇"
+        if not title:
+            errors.append(f"{label}：标题不能为空")
+        elif len(title) > MAX_TYPING_TITLE:
+            errors.append(f"{label}：标题不能超过 {MAX_TYPING_TITLE} 字")
+        elif not content:
+            errors.append(f"「{title}」：正文不能为空")
+        elif len(content) > MAX_TYPING_CONTENT:
+            errors.append(f"「{title}」：正文过长（上限 {MAX_TYPING_CONTENT} 字）")
+        elif current.get("error"):
+            errors.append(f"「{title}」：{current['error']}")
+        else:
+            articles.append(_typing_article(title, content, current["difficulty"], current["time_limit"]))
+        current = None
+        body = []
+
+    index = 0
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        title_match = _TITLE_RE.match(line)
+        if title_match:
+            flush()
+            index += 1
+            current = {
+                "index": index,
+                "title": title_match.group(1),
+                "difficulty": default_difficulty,
+                "time_limit": default_time_limit,
+                "error": "",
+            }
+            body = []
+            continue
+        if current is None:
+            if line and not saw_leading:
+                errors.append("批量导入请以【标题】开头，或使用表格格式")
+                saw_leading = True
+            continue
+        if not line:
+            if body:
+                body.append(raw_line)
+            continue
+        if not body:
+            diff_match = _DIFF_RE.match(line)
+            if diff_match:
+                difficulty, err = _parse_typing_difficulty(diff_match.group(1), default_difficulty)
+                if err:
+                    current["error"] = err
+                else:
+                    current["difficulty"] = difficulty
+                continue
+            time_match = _TIME_RE.match(line)
+            if time_match:
+                time_limit, err = _parse_typing_time_limit(time_match.group(1), default_time_limit)
+                if err:
+                    current["error"] = err
+                else:
+                    current["time_limit"] = time_limit
+                continue
+        body.append(raw_line)
+    flush()
+    return articles, errors
+
+
+def parse_typing_articles(
+    text: str,
+    default_title: str = "",
+    default_difficulty: TypingDifficulty = TypingDifficulty.basic,
+    default_time_limit: int = 120,
+) -> tuple[list[dict], list[str]]:
+    """解析打字文章导入文本。
+
+    支持：
+    - 【标题】分段（可选【难度】【时长】）
+    - CSV/TSV 表头：标题,正文,难度,建议时长
+    - 单篇纯文本（使用 default_title，通常来自表单或文件名）
+    """
+    text = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return [], ["导入内容为空"]
+
+    if default_time_limit < 30 or default_time_limit > 600:
+        return [], ["建议时长需在 30 到 600 秒之间"]
+
+    if _looks_like_typing_csv(text):
+        return _parse_typing_csv(text, default_difficulty, default_time_limit)
+
+    if any(_TITLE_RE.match(ln.strip()) for ln in text.split("\n")):
+        return _parse_typing_blocks(text, default_difficulty, default_time_limit)
+
+    title = (default_title or "").strip()
+    if not title:
+        return [], ["单篇文章请填写标题，或使用【标题】分段 / CSV 表格批量导入"]
+    if len(title) > MAX_TYPING_TITLE:
+        return [], [f"标题不能超过 {MAX_TYPING_TITLE} 字"]
+    if len(text) > MAX_TYPING_CONTENT:
+        return [], [f"正文过长（上限 {MAX_TYPING_CONTENT} 字）"]
+    return [_typing_article(title, text, default_difficulty, default_time_limit)], []

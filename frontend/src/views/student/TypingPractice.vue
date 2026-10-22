@@ -2,7 +2,7 @@
   <div class="typing-page">
     <div class="page-header">
       <h1>打字练习</h1>
-      <p>左侧选择文章并开始，右侧上方为对照文章，下方为输入区</p>
+      <p>选择文章和模式后开始。上方为对照文章，下方为输入区</p>
     </div>
 
     <el-alert
@@ -19,122 +19,108 @@
       </template>
     </el-alert>
 
-    <div class="typing-layout">
-      <!-- 左侧：选择 + 开始打字 -->
-      <aside class="sidebar content-card" :class="{ locked: inClassTest }">
-        <section v-if="inClassTest" class="sidebar-section class-test-info">
-          <h3>课堂测试</h3>
-          <p>{{ classSession?.title }}</p>
-          <el-tag type="warning" size="small">5 分钟 · 不可停止</el-tag>
-        </section>
+    <div class="practice-bar content-card">
+      <div class="bar-field article-field" v-if="!inClassTest">
+        <span class="bar-label">文章</span>
+        <el-select
+          v-model="selectedId"
+          class="article-select"
+          filterable
+          :disabled="typingActive || !texts.length"
+          :loading="loading"
+          placeholder="选择练习文章"
+          no-data-text="暂无练习文章"
+          no-match-text="没有匹配的文章"
+          @change="onArticleChange"
+        >
+          <el-option
+            v-for="item in texts"
+            :key="item.id"
+            :label="`${item.title}（${item.char_count} 字）`"
+            :value="item.id"
+          />
+        </el-select>
+      </div>
+      <div class="bar-field class-field" v-else>
+        <span class="bar-label">课堂测试</span>
+        <span class="class-test-title">{{ classSession?.text_title }}</span>
+        <el-tag type="warning" size="small">5 分钟 · 不可停止</el-tag>
+      </div>
 
-        <section class="sidebar-section" v-if="!inClassTest">
-          <h3>选择文章</h3>
-          <div class="text-list" v-loading="loading">
-            <button
-              v-for="item in texts"
-              :key="item.id"
-              type="button"
-              class="text-item"
-              :class="{ active: selectedId === item.id }"
-              :disabled="typingActive"
-              @click="selectText(item.id)"
-            >
-              <span class="text-title">{{ item.title }}</span>
-              <span class="text-meta">{{ item.content.length }} 字</span>
-            </button>
-            <p v-if="!loading && !texts.length" class="text-empty">暂无练习文章</p>
-          </div>
-        </section>
+      <div class="bar-field" v-if="!inClassTest">
+        <span class="bar-label">模式</span>
+        <el-radio-group
+          v-model="practiceMode"
+          :disabled="typingActive"
+          @change="onModeChange"
+        >
+          <el-radio-button value="free">自由练习</el-radio-button>
+          <el-radio-button value="test">5分钟测试</el-radio-button>
+        </el-radio-group>
+        <span class="mode-hint">{{ practiceMode === 'free' ? '可随时暂停和停止' : '可随时停止并提交' }}</span>
+      </div>
 
-        <section class="sidebar-section" v-if="!inClassTest">
-          <h3>练习模式</h3>
-          <el-radio-group
-            v-model="practiceMode"
-            class="mode-group"
-            :disabled="typingActive"
-            @change="onModeChange"
-          >
-            <el-radio-button value="free">自由练习</el-radio-button>
-            <el-radio-button value="test">5分钟测试</el-radio-button>
-          </el-radio-group>
-          <p class="mode-hint" v-if="practiceMode === 'free'">可随时暂停和停止</p>
-          <p class="mode-hint" v-else>可随时停止并提交当前成绩</p>
-        </section>
-
-        <section class="sidebar-section start-section" v-if="selected">
-          <h3>开始打字</h3>
-          <div class="control-stack">
-            <el-button
-              v-if="!typingActive && !lastFinished"
-              type="primary"
-              size="large"
-              class="start-btn"
-              @click="startTyping"
-            >
-              开始打字
-            </el-button>
-
-            <template v-if="typingActive && practiceMode === 'free'">
-              <el-button v-if="!panelPaused" size="large" class="start-btn" @click="typingRef?.pause()">暂停</el-button>
-              <el-button v-else type="primary" size="large" class="start-btn" @click="typingRef?.resume()">继续</el-button>
-              <el-button type="danger" size="large" class="start-btn" @click="typingRef?.stop()">停止</el-button>
-            </template>
-
-            <template v-if="typingActive && practiceMode === 'test' && !inClassTest">
-              <el-button type="danger" size="large" class="start-btn" @click="typingRef?.stop()">停止</el-button>
-            </template>
-
-            <el-button
-              v-if="lastFinished && !typingActive"
-              size="large"
-              class="start-btn"
-              @click="retryTyping"
-            >
-              再来一次
-            </el-button>
-          </div>
-        </section>
-      </aside>
-
-      <!-- 右侧：对照文章 + 输入框 -->
-      <section class="main-panel content-card" v-if="selected">
-        <div class="score-card" v-if="lastResult">
-          <div class="score-main">
-            <span class="score-value">{{ lastResult.score }}</span>
-            <span class="score-unit">分</span>
-          </div>
-          <div class="score-detail">
-            <el-tag effect="dark" :color="levelColor(lastResult.level)">{{ lastResult.level }}</el-tag>
-            <span>{{ lastResult.wpm }} 字/分</span>
-            <span>准确率 {{ lastResult.accuracy }}%</span>
-            <span class="score-remark">{{ lastResult.remark }}</span>
-          </div>
-        </div>
-        <TypingTest
-          ref="typingRef"
-          :key="`${selected.id}-${practiceMode}-${sessionKey}-${inClassTest}`"
-          :reference-text="selected.content"
-          :mode="practiceMode"
-          :time-limit="300"
-          :allow-stop="!inClassTest"
-          expanded
-          hide-controls
-          @started="onStarted"
-          @finished="onFinished"
-          @state="onPanelState"
-          @complete="handleComplete"
-        />
-      </section>
-
-      <section class="main-panel content-card empty" v-else>
-        <p>请先在左侧选择一篇文章</p>
-      </section>
+      <div class="bar-actions">
+        <el-button
+          v-if="!typingActive && !lastFinished"
+          type="primary"
+          :disabled="!selected"
+          @click="startTyping"
+        >
+          开始打字
+        </el-button>
+        <template v-if="typingActive && practiceMode === 'free'">
+          <el-button v-if="!panelPaused" @click="typingRef?.pause()">暂停</el-button>
+          <el-button v-else type="primary" @click="typingRef?.resume()">继续</el-button>
+          <el-button type="danger" @click="typingRef?.stop()">停止</el-button>
+        </template>
+        <el-button
+          v-if="typingActive && practiceMode === 'test' && !inClassTest"
+          type="danger"
+          @click="typingRef?.stop()"
+        >
+          停止
+        </el-button>
+        <el-button v-if="lastFinished && !typingActive" @click="retryTyping">再来一次</el-button>
+        <el-button @click="historyVisible = true">我的记录</el-button>
+      </div>
     </div>
 
-    <div class="content-card history-card">
-      <h3>我的打字记录</h3>
-      <el-table :data="history" stripe size="small" v-loading="historyLoading" empty-text="暂无练习记录">
+    <section class="main-panel content-card" v-if="selected">
+      <div class="score-card" v-if="lastResult">
+        <div class="score-main">
+          <span class="score-value">{{ lastResult.score }}</span>
+          <span class="score-unit">分</span>
+        </div>
+        <div class="score-detail">
+          <el-tag effect="dark" :color="levelColor(lastResult.level)">{{ lastResult.level }}</el-tag>
+          <span>{{ lastResult.wpm }} 字/分</span>
+          <span>准确率 {{ lastResult.accuracy }}%</span>
+          <span class="score-remark">{{ lastResult.remark }}</span>
+        </div>
+      </div>
+      <TypingTest
+        ref="typingRef"
+        :key="`${selected.id}-${practiceMode}-${sessionKey}-${inClassTest}`"
+        :reference-text="selected.content"
+        :mode="practiceMode"
+        :time-limit="300"
+        :allow-stop="!inClassTest"
+        expanded
+        hide-controls
+        @started="onStarted"
+        @finished="onFinished"
+        @state="onPanelState"
+        @complete="handleComplete"
+      />
+    </section>
+
+    <section class="main-panel content-card empty" v-else>
+      <p>{{ loading ? '正在加载文章…' : '暂无练习文章，请等待教师导入' }}</p>
+    </section>
+
+    <el-dialog v-model="historyVisible" title="我的打字记录" width="860px">
+      <el-table :data="history" stripe size="small" v-loading="historyLoading" empty-text="暂无练习记录" max-height="420">
         <el-table-column prop="text_title" label="文章" min-width="160" />
         <el-table-column label="模式" width="100">
           <template #default="{ row }">{{ modeLabel(row.source) }}</template>
@@ -157,7 +143,7 @@
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
       </el-table>
-    </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -177,6 +163,7 @@ const classSession = ref(null)
 const inClassTest = ref(false)
 const panelPaused = ref(false)
 const lastFinished = ref(false)
+const historyVisible = ref(false)
 
 const selected = computed(() => texts.value.find((t) => t.id === selectedId.value))
 const typingActive = ref(false)
@@ -211,12 +198,14 @@ async function loadTexts() {
   if (texts.value.length && !selectedId.value) {
     selectedId.value = texts.value[0].id
   }
+  if (selectedId.value && !texts.value.some((item) => item.id === selectedId.value)) {
+    selectedId.value = texts.value[0]?.id ?? null
+  }
   loading.value = false
 }
 
-function selectText(id) {
-  if (typingActive.value || selectedId.value === id) return
-  selectedId.value = id
+function onArticleChange() {
+  if (typingActive.value) return
   lastFinished.value = false
   lastResult.value = null
   sessionKey.value++
@@ -261,7 +250,6 @@ function retryTyping() {
   lastResult.value = null
   typingRef.value?.reset()
   sessionKey.value++
-  // 下一帧自动开始
   setTimeout(() => typingRef.value?.start(), 50)
 }
 
@@ -323,164 +311,97 @@ onUnmounted(() => {
 
 <style scoped>
 .class-test-alert {
-  margin-bottom: 16px;
-}
-
-.class-test-info p {
-  margin: 6px 0;
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.sidebar.locked .text-item:not(.active) {
-  display: none;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .typing-page {
-  max-width: none;
-  margin: 0;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
   width: 100%;
-  min-height: calc(100vh - 132px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .page-header h1 {
-  margin: 0 0 6px;
-  font-size: 24px;
+  margin: 0 0 2px;
+  font-size: 20px;
 }
 
 .page-header p {
   margin: 0;
   color: #6b7280;
-  font-size: 14px;
-}
-
-.typing-layout {
-  flex: 1;
-  display: flex;
-  gap: 20px;
-  min-height: calc(100vh - 280px);
-  align-items: stretch;
-}
-
-.sidebar {
-  width: 300px;
-  flex-shrink: 0;
-  margin-bottom: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  overflow-y: auto;
-}
-
-.sidebar-section h3 {
-  font-size: 15px;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 12px;
-}
-
-.text-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.text-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f9fafb;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.2s, background 0.2s;
-}
-
-.text-item:hover:not(:disabled) {
-  border-color: #c7d2fe;
-  background: #eef2ff;
-}
-
-.text-item.active {
-  border-color: #4f46e5;
-  background: #eef2ff;
-}
-
-.text-item:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.text-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #111827;
-}
-
-.text-meta {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.text-empty {
   font-size: 13px;
-  color: #9ca3af;
-  margin: 0;
 }
 
-.mode-group {
+.practice-bar {
   display: flex;
-  width: 100%;
+  align-items: center;
+  gap: 16px 20px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin-bottom: 10px;
+  padding: 12px 16px;
 }
 
-.mode-group :deep(.el-radio-button) {
-  flex: 1;
+.bar-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.mode-group :deep(.el-radio-button__inner) {
+.article-field {
+  flex: 1 1 280px;
+}
+
+.bar-label {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.article-select {
   width: 100%;
+  min-width: 220px;
+}
+
+.class-test-title {
+  font-size: 14px;
+  color: #111827;
 }
 
 .mode-hint {
-  margin: 10px 0 0;
-  font-size: 13px;
+  font-size: 12px;
   color: #9ca3af;
+  white-space: nowrap;
 }
 
-.start-section {
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: 1px solid #f3f4f6;
-}
-
-.control-stack {
+.bar-actions {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.start-btn {
-  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .main-panel {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   margin-bottom: 0;
-  padding: 20px 24px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  min-height: 560px;
+  overflow: hidden;
 }
 
 .empty {
@@ -493,9 +414,9 @@ onUnmounted(() => {
 .score-card {
   display: flex;
   align-items: center;
-  gap: 24px;
-  margin-bottom: 16px;
-  padding: 18px 22px;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding: 10px 14px;
   border-radius: 12px;
   background: linear-gradient(135deg, #eef2ff, #ecfdf5);
   flex-shrink: 0;
@@ -508,14 +429,14 @@ onUnmounted(() => {
 }
 
 .score-value {
-  font-size: 42px;
+  font-size: 32px;
   font-weight: 700;
   color: #4f46e5;
   line-height: 1;
 }
 
 .score-unit {
-  font-size: 16px;
+  font-size: 14px;
   color: #6b7280;
 }
 
@@ -523,7 +444,7 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   font-size: 14px;
   color: #374151;
 }
@@ -532,27 +453,8 @@ onUnmounted(() => {
   color: #6b7280;
 }
 
-.history-card {
-  margin-top: 20px;
-}
-
-.history-card h3 {
-  margin: 0 0 16px;
-  font-size: 16px;
-}
-
-@media (max-width: 900px) {
-  .typing-layout {
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .sidebar {
-    width: 100%;
-  }
-
-  .main-panel {
-    min-height: 480px;
-  }
+.main-panel :deep(.typing-panel) {
+  flex: 1;
+  min-height: 0;
 }
 </style>

@@ -133,6 +133,19 @@ export const typingApi = {
   records: (params) => api.get('/typing/records', { params }),
   classStats: (className) => api.get('/typing/records/stats', { params: { class_name: className || undefined } }),
   createText: (data) => api.post('/typing/texts', data),
+  importTexts: (data) => api.post('/typing/texts/import', data),
+  importTextsFile: (file, { title = '', difficulty = 'basic', time_limit = 120 } = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    const qs = new URLSearchParams({
+      difficulty,
+      time_limit: String(time_limit),
+    })
+    if (title) qs.set('title', title)
+    return api.post(`/typing/texts/import/file?${qs.toString()}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   updateText: (id, data) => api.put(`/typing/texts/${id}`, data),
   deleteText: (id) => api.delete(`/typing/texts/${id}`),
   sessions: () => api.get('/typing/sessions'),

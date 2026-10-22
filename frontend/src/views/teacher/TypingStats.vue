@@ -8,14 +8,19 @@
     <div class="content-card materials-card">
       <div class="toolbar">
         <div>
-          <h3 class="section-title">我的练习素材</h3>
-          <p class="section-hint">练习内容与当前教师账号绑定，仅本班学生可见</p>
+          <h3 class="section-title">练习文章</h3>
+          <p class="section-hint">可手动添加，或粘贴 / 上传 txt、csv 导入。文章绑定当前教师，本班学生可选用</p>
         </div>
-        <el-button type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon> 添加素材
-        </el-button>
+        <div class="toolbar-actions">
+          <el-button @click="importVisible = true">
+            <el-icon><Upload /></el-icon> 导入文章
+          </el-button>
+          <el-button type="primary" @click="openCreate">
+            <el-icon><Plus /></el-icon> 手动添加
+          </el-button>
+        </div>
       </div>
-      <el-table :data="myTexts" stripe v-loading="textsLoading" empty-text="暂无练习素材，请先添加">
+      <el-table :data="myTexts" stripe v-loading="textsLoading" empty-text="暂无练习文章，请先导入或添加">
         <el-table-column prop="title" label="标题" min-width="160" />
         <el-table-column label="难度" width="100">
           <template #default="{ row }">{{ difficultyLabel(row.difficulty) }}</template>
@@ -115,7 +120,9 @@
       </el-table>
     </el-dialog>
 
-    <el-dialog v-model="textDialogVisible" :title="editingText ? '编辑练习素材' : '添加练习素材'" width="640px">
+    <ArticleImportDialog v-model="importVisible" @success="loadTexts" />
+
+    <el-dialog v-model="textDialogVisible" :title="editingText ? '编辑练习文章' : '添加练习文章'" width="640px">
       <el-form :model="textForm" label-width="100px">
         <el-form-item label="标题" required>
           <el-input v-model="textForm.title" placeholder="例如：达标练习 — 中考模拟" />
@@ -148,6 +155,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { typingApi, exportApi } from '@/api'
+import ArticleImportDialog from '@/components/ArticleImportDialog.vue'
 import ClassFilter from '@/components/ClassFilter.vue'
 
 const loading = ref(true)
@@ -160,6 +168,7 @@ const records = ref([])
 const currentStudent = ref(null)
 const myTexts = ref([])
 const textsLoading = ref(false)
+const importVisible = ref(false)
 const textDialogVisible = ref(false)
 const textSaving = ref(false)
 const editingText = ref(null)
@@ -229,7 +238,7 @@ async function saveText() {
       ElMessage.success('已更新')
     } else {
       await typingApi.createText(textForm.value)
-      ElMessage.success('已添加（绑定到当前教师账号）')
+      ElMessage.success('已添加，本班学生可在打字练习中选用')
     }
     textDialogVisible.value = false
     await loadTexts()
@@ -239,7 +248,7 @@ async function saveText() {
 }
 
 async function removeText(row) {
-  await ElMessageBox.confirm(`确定删除「${row.title}」吗？`, '删除素材', { type: 'warning' })
+  await ElMessageBox.confirm(`确定删除「${row.title}」吗？删除后学生将不能再选择这篇文章。`, '删除文章', { type: 'warning' })
   await typingApi.deleteText(row.id)
   ElMessage.success('已删除')
   await loadTexts()
@@ -286,7 +295,8 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
-.toolbar-right {
+.toolbar-right,
+.toolbar-actions {
   display: flex;
   gap: 12px;
 }

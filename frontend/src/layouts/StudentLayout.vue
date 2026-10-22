@@ -1,5 +1,5 @@
 <template>
-  <div class="layout">
+  <div class="layout" :class="{ 'layout-lock': isTyping }">
     <header class="header">
       <div class="header-left">
         <el-icon :size="28" color="#4f46e5"><Reading /></el-icon>
@@ -27,22 +27,27 @@
       </router-link>
     </nav>
 
-    <main class="main" :class="{ wide: $route.name === 'TypingPractice' }">
-      <router-view />
+    <main class="main" :class="{ wide: isTyping, lock: isTyping }">
+      <div class="view-slot" :class="{ fill: isTyping }">
+        <router-view />
+      </div>
       <CopyrightFooter />
     </main>
   </div>
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useHeartbeat } from '@/composables/useHeartbeat'
 import CopyrightFooter from '@/components/CopyrightFooter.vue'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const isTyping = computed(() => route.name === 'TypingPractice')
 
 useHeartbeat()
 
@@ -58,6 +63,17 @@ async function handleLogout() {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+.layout-lock {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.layout-lock .header,
+.layout-lock .nav {
+  flex-shrink: 0;
 }
 
 .header {
@@ -135,5 +151,32 @@ async function handleLogout() {
 
 .main.wide {
   max-width: 1480px;
+}
+
+.main.lock {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 24px 8px;
+}
+
+.view-slot {
+  min-width: 0;
+}
+
+.view-slot.fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main.lock :deep(.copyright-footer) {
+  flex-shrink: 0;
+  padding-top: 6px;
+  padding-bottom: 0;
 }
 </style>
