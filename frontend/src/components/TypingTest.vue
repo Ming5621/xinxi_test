@@ -137,6 +137,18 @@ function calcStats(typed, reference, seconds) {
   return { correct, accuracy: acc, wpm }
 }
 
+const HIGH_GRADES = ['良好', '优秀', '卓越']
+
+function resolveLevel(wpm, accuracy) {
+  const cfg = props.typingConfig || {}
+  const minAccuracy = cfg.min_accuracy ?? 95
+  const bySpeed = standards.find((s) => wpm >= s.min_wpm) || standards[standards.length - 1]
+  if (accuracy < minAccuracy && HIGH_GRADES.includes(bySpeed.level)) {
+    return standards.find((s) => s.level === '达标' && wpm >= s.min_wpm) || standards[standards.length - 1]
+  }
+  return bySpeed
+}
+
 function calcScore(wpm, accuracy, maxScore) {
   const cfg = props.typingConfig || {}
   const minAccuracy = cfg.min_accuracy ?? 95
@@ -252,7 +264,7 @@ function finish() {
   elapsed.value = getActiveElapsed()
 
   const stats = calcStats(typedText.value, props.referenceText, elapsed.value)
-  const level = standards.find((s) => stats.wpm >= s.min_wpm) || standards[standards.length - 1]
+  const level = resolveLevel(stats.wpm, stats.accuracy)
   const score = calcScore(stats.wpm, stats.accuracy, props.maxScore)
 
   result.value = {

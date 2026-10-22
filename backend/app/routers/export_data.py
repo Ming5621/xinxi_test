@@ -11,6 +11,7 @@ from ..auth import require_teacher
 from ..database import get_db
 from ..models import Exam, ExamSession, SessionStatus, TypingRecord, User, UserRole
 from ..permissions import apply_student_scope, ensure_class_access, filter_class_name, get_assigned_classes
+from ..typing_utils import DEFAULT_TYPING_CONFIG, get_typing_level
 
 router = APIRouter(prefix="/api/export", tags=["数据导出"])
 
@@ -156,7 +157,7 @@ def export_typing_records(
             r.score,
             r.wpm,
             r.accuracy,
-            r.level,
+            get_typing_level(r.wpm, r.accuracy, DEFAULT_TYPING_CONFIG["min_accuracy"])["level"],
             r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
         ])
     suffix = class_name or "全部"

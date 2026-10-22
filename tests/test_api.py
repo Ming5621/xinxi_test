@@ -527,8 +527,32 @@ if texts:
     check("提交打字练习", code == 200 and typing_result.get("wpm", 0) >= 0)
     check("打字练习返回评分", code == 200 and float(typing_result.get("score") or 0) > 0)
 
+code, low_acc = req("POST", "/typing/submit", {
+    "reference_text": "测" * 200,
+    "typed_text": "测" * 17,
+    "duration_seconds": 10,
+    "source": "practice",
+}, token=student_token)
+check(
+    "高速低准确率不得卓越",
+    code == 200
+    and abs(float(low_acc.get("accuracy", 0)) - 8.5) < 0.05
+    and float(low_acc.get("wpm", 0)) >= 40
+    and low_acc.get("level") not in ("良好", "优秀", "卓越")
+    and "卓越" not in (low_acc.get("remark") or ""),
+    str(low_acc),
+)
+
 code, records = req("GET", "/typing/records/my", token=student_token)
+latest_low = records[0] if code == 200 and records else {}
 check("查看打字记录", code == 200)
+check(
+    "历史记录低准确率不得卓越",
+    abs(float(latest_low.get("accuracy") or 0) - 8.5) < 0.05
+    and float(latest_low.get("wpm") or 0) >= 40
+    and latest_low.get("level") not in ("良好", "优秀", "卓越"),
+    str(latest_low),
+)
 
 code, class_stats = req("GET", "/typing/records/stats", token=teacher_token)
 check("教师打字统计", code == 200)

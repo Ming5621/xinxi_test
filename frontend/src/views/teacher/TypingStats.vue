@@ -91,7 +91,7 @@
           </div>
         </el-col>
       </el-row>
-      <p class="std-note">准确率要求 ≥ 95% · 综合评分满分 100 分</p>
+      <p class="std-note">准确率 ≥ 95% 方可获得良好 / 优秀 / 卓越 · 综合评分满分 100 分</p>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="`${currentStudent?.student_name || ''} 的打字记录`" width="760px">

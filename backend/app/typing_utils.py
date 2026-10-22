@@ -4,6 +4,7 @@
 - 中考信息技术：中文录入约 10 字/分钟
 - 义务教育信息科技课标（第三学段）：基础达标 ≥30 字/分钟，准确率 ≥95%
 - 技能训练：良好 20 字/分钟，卓越 40 字/分钟
+- 准确率低于 95% 时，不授予良好、优秀、卓越
 """
 from typing import Optional
 
@@ -25,9 +26,34 @@ DEFAULT_TYPING_CONFIG = {
 }
 
 
-def get_typing_level(wpm: float) -> dict:
+# 良好及以上必须同时达到准确率门槛，否则最高只能记为达标
+HIGH_GRADE_LEVELS = {"良好", "优秀", "卓越"}
+
+
+def get_typing_level(
+    wpm: float,
+    accuracy: Optional[float] = None,
+    min_accuracy: float = 95,
+) -> dict:
+    """按速度评定等级。
+
+    良好、优秀、卓越还要求准确率不低于 min_accuracy（默认 95%）。
+    准确率不足时，速度达到 10 字/分钟记为达标，否则为未达标。
+    未传入 accuracy 时只按速度分档。
+    """
+    matched = TYPING_LEVELS[-1]
     for item in TYPING_LEVELS:
         if wpm >= item["min_wpm"]:
+            matched = item
+            break
+
+    if accuracy is None or accuracy >= min_accuracy:
+        return matched
+    if matched["level"] not in HIGH_GRADE_LEVELS:
+        return matched
+
+    for item in TYPING_LEVELS:
+        if item["level"] == "达标" and wpm >= item["min_wpm"]:
             return item
     return TYPING_LEVELS[-1]
 
@@ -101,7 +127,7 @@ def score_typing_question(
     min_accuracy = config.get("min_accuracy", 95)
     min_wpm = config.get("min_wpm", 10)
 
-    level = get_typing_level(wpm)
+    level = get_typing_level(wpm, accuracy, min_accuracy)
     passed = wpm >= min_wpm and accuracy >= min_accuracy
 
     if accuracy < 80:

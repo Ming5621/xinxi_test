@@ -71,7 +71,9 @@ def _grade_session(session: ExamSession, db: Session):
             score, passed, remark = score_typing_question(wpm, accuracy, question.score, config)
             answer.is_correct = passed
             answer.score = score
-            answer.answer_meta = {**meta, "remark": remark, "level": get_typing_level(wpm)["level"]}
+            min_accuracy = float(config.get("min_accuracy", 95))
+            level_name = get_typing_level(float(wpm or 0), float(accuracy or 0), min_accuracy)["level"]
+            answer.answer_meta = {**meta, "remark": remark, "level": level_name}
             total_score += score
         else:
             student_ans = normalize_answer(answer.student_answer, question.type)
@@ -499,6 +501,18 @@ def get_session_detail(
     answers_out = []
     for ans in session.answers:
         q = ans.question
+        meta = ans.answer_meta
+        if q.type == QuestionType.typing and meta:
+            config = parse_typing_config(q.options)
+            wpm = float(meta.get("wpm") or 0)
+            accuracy = float(meta.get("accuracy") or 0)
+            min_accuracy = float(config.get("min_accuracy", 95))
+            _, _, remark = score_typing_question(wpm, accuracy, q.score, config)
+            meta = {
+                **meta,
+                "level": get_typing_level(wpm, accuracy, min_accuracy)["level"],
+                "remark": remark,
+            }
         answers_out.append(
             {
                 "question_id": ans.question_id,
@@ -507,7 +521,7 @@ def get_session_detail(
                 "score": ans.score,
                 "correct_answer": q.correct_answer if session.status == SessionStatus.submitted and q.type != QuestionType.typing else None,
                 "question_content": q.content,
-                "answer_meta": ans.answer_meta,
+                "answer_meta": meta,
             }
         )
 
