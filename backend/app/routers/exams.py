@@ -490,6 +490,8 @@ def get_session_detail(
         raise HTTPException(status_code=403, detail="无权查看")
 
     student = session.student
+    if student is None:
+        raise HTTPException(status_code=404, detail="学生账号不存在")
     if current_user.role.value == "teacher":
         ensure_class_access(current_user, student.class_name)
 

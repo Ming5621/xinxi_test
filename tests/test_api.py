@@ -137,6 +137,183 @@ check("管理员登录", admin_token and admin["role"] == "admin")
 code, teachers = req("GET", "/users?role=teacher", token=admin_token)
 check("管理员查看教师列表", code == 200 and len(teachers) >= 4)
 
+# 3b. 管理员管理全部账号
+TEST_ACCOUNT_NAMES = {"账号测生", "账号测生乙", "账号测师", "账号测师乙", "转学生甲"}
+
+
+def purge_test_accounts():
+    code, rows = req("GET", "/users", token=admin_token)
+    if code != 200:
+        return
+    for row in rows:
+        if row.get("role") == "admin":
+            continue
+        username = row.get("username") or ""
+        if username.startswith("test_acct_") or row.get("name") in TEST_ACCOUNT_NAMES:
+            req("DELETE", f"/users/{row['id']}", token=admin_token)
+
+
+purge_test_accounts()
+
+code, all_users = req("GET", "/users", token=admin_token)
+roles = {u["role"] for u in all_users} if code == 200 else set()
+check("管理员查看全部账号", code == 200 and {"admin", "teacher", "student"} <= roles, str(roles))
+
+code, teacher_view = req("GET", "/users", token=teacher_token)
+teacher_roles = {u["role"] for u in teacher_view} if code == 200 else {"error"}
+check("教师用户列表仅含学生", code == 200 and teacher_roles <= {"student"}, str(teacher_roles))
+
+code, _ = req("POST", "/users", {
+    "username": "test_acct_admin2",
+    "name": "第二个管理员",
+    "password": "admin123",
+    "role": "admin",
+}, token=admin_token)
+check("不能创建管理员", code == 400)
+
+code, new_teacher = req("POST", "/users", {
+    "username": "test_acct_teacher",
+    "name": "账号测师",
+    "password": "pass1234",
+    "role": "teacher",
+    "assigned_classes": ["课堂"],
+}, token=admin_token)
+check("管理员创建教师", code == 200 and new_teacher.get("role") == "teacher", str(new_teacher))
+acct_teacher_id = new_teacher.get("id") if code == 200 else None
+
+code, new_student = req("POST", "/users", {
+    "username": "test_acct_student",
+    "name": "账号测生",
+    "role": "student",
+    "class_name": "课堂",
+}, token=admin_token)
+check(
+    "管理员创建学生可无密码",
+    code == 200 and new_student.get("role") == "student" and new_student.get("class_name") == "课堂",
+    str(new_student),
+)
+acct_student_id = new_student.get("id") if code == 200 else None
+
+code, _ = req("POST", "/users", {
+    "username": "test_acct_student_b",
+    "name": "账号测生",
+    "role": "student",
+    "class_name": "课堂",
+}, token=admin_token)
+check("同班同名学生拒绝", code == 400)
+
+if acct_student_id:
+    code, renamed = req("PUT", f"/users/{acct_student_id}", {
+        "username": "test_acct_student_renamed",
+        "name": "账号测生乙",
+        "class_name": "课堂",
+    }, token=admin_token)
+    check(
+        "管理员修改学生姓名和用户名",
+        code == 200 and renamed.get("name") == "账号测生乙" and renamed.get("username") == "test_acct_student_renamed",
+        str(renamed),
+    )
+    code, _ = req("PUT", f"/users/{acct_student_id}", {"username": "hacked_by_teacher"}, token=teacher_token)
+    check("教师不能修改用户名", code == 403)
+    code, _ = req("PUT", f"/users/{acct_student_id}", {"role": "teacher"}, token=teacher_token)
+    check("教师不能修改角色", code == 403)
+    code, teacher_edit = req("PUT", f"/users/{acct_student_id}", {
+        "name": "账号测生乙",
+        "class_name": "课堂",
+    }, token=teacher_token)
+    check("教师仍可修改本班学生", code == 200 and teacher_edit.get("name") == "账号测生乙", str(teacher_edit))
+    tok, usr = student_login("账号测生乙")
+    check("改名后姓名登录命中原账号", bool(tok) and usr and usr.get("id") == acct_student_id, str(usr))
+    tok, usr = student_login("账号测生")
+    check("旧姓名不再指向原账号", bool(tok) and usr and usr.get("id") != acct_student_id, str(usr))
+
+if acct_teacher_id:
+    code, updated = req("PUT", f"/users/{acct_teacher_id}", {
+        "username": "test_acct_teacher2",
+        "name": "账号测师乙",
+        "password": "newpass123",
+        "assigned_classes": ["课堂", "微机1班"],
+    }, token=admin_token)
+    classes_ok = "微机1班" in (updated.get("assigned_classes") or []) if code == 200 else False
+    check(
+        "管理员重置教师密码并改用户名",
+        code == 200 and updated.get("username") == "test_acct_teacher2" and classes_ok,
+        str(updated),
+    )
+    tok, usr = login("test_acct_teacher2", "newpass123")
+    check("新密码可登录", bool(tok) and usr and usr.get("id") == acct_teacher_id)
+    tok, _ = login("test_acct_teacher2", "pass1234")
+    check("旧密码失效", tok is None)
+
+    code, disabled = req("PUT", f"/users/{acct_teacher_id}", {"is_active": False}, token=admin_token)
+    check("管理员禁用教师", code == 200 and disabled.get("is_active") is False, str(disabled))
+    tok, _ = login("test_acct_teacher2", "newpass123")
+    check("禁用后无法登录", tok is None)
+    code, enabled = req("PUT", f"/users/{acct_teacher_id}", {"is_active": True}, token=admin_token)
+    check("管理员重新启用教师", code == 200 and enabled.get("is_active") is True, str(enabled))
+
+    code, as_student = req("PUT", f"/users/{acct_teacher_id}", {
+        "role": "student",
+        "name": "转学生甲",
+        "class_name": "课堂",
+    }, token=admin_token)
+    check(
+        "教师可改为学生",
+        code == 200 and as_student.get("role") == "student" and as_student.get("class_name") == "课堂",
+        str(as_student),
+    )
+    tok, usr = student_login("转学生甲")
+    check("转成学生后可姓名登录", bool(tok) and usr and usr.get("id") == acct_teacher_id, str(usr))
+
+    code, back = req("PUT", f"/users/{acct_teacher_id}", {
+        "role": "teacher",
+        "name": "账号测师乙",
+        "password": "newpass123",
+        "assigned_classes": ["课堂"],
+    }, token=admin_token)
+    check(
+        "学生可改回教师",
+        code == 200 and back.get("role") == "teacher" and back.get("class_name") == "",
+        str(back),
+    )
+    tok, _ = login("test_acct_teacher2", "newpass123")
+    check("改回教师后密码登录", bool(tok))
+    code, _ = req("PUT", f"/users/{acct_teacher_id}", {"role": "admin"}, token=admin_token)
+    check("不能把账号升为管理员", code == 400)
+    code, _ = req("DELETE", f"/users/{acct_teacher_id}", token=teacher_token)
+    check("教师不能删除教师账号", code == 403)
+    code, _ = req("DELETE", f"/users/{acct_teacher_id}", token=admin_token)
+    check("管理员删除教师", code == 200)
+
+if acct_student_id:
+    code, _ = req("DELETE", f"/users/{acct_student_id}", token=admin_token)
+    check("管理员删除学生", code == 200)
+
+admin_id = admin["id"]
+code, renamed_admin = req("PUT", f"/users/{admin_id}", {"name": "临时管理员"}, token=admin_token)
+check("管理员可改自己的姓名", code == 200 and renamed_admin.get("name") == "临时管理员", str(renamed_admin))
+code, _ = req("PUT", f"/users/{admin_id}", {"password": "admin123temp"}, token=admin_token)
+check("管理员可重置自己的密码", code == 200)
+temp_token, _ = login("admin", "admin123temp")
+check("管理员新密码可登录", bool(temp_token))
+code, _ = req("PUT", f"/users/{admin_id}", {"name": "系统管理员", "password": "admin123"}, token=admin_token)
+check("管理员姓名和密码已恢复", code == 200)
+admin_token, admin = login("admin", "admin123")
+check("默认管理员密码仍可用", bool(admin_token) and admin and admin.get("name") == "系统管理员")
+
+code, _ = req("PUT", f"/users/{admin_id}", {"is_active": False}, token=admin_token)
+check("不能禁用自己", code == 400)
+code, _ = req("DELETE", f"/users/{admin_id}", token=admin_token)
+check("不能删除自己", code == 400)
+code, _ = req("PUT", f"/users/{admin_id}", {"role": "teacher"}, token=admin_token)
+check("不能修改管理员角色", code == 400)
+code, me = req("GET", "/auth/me", token=admin_token)
+check("管理员账号仍可用", code == 200 and me.get("role") == "admin" and me.get("is_active") is True, str(me))
+code, _ = req("GET", "/users", token=student_token)
+check("学生仍不能管理账号", code == 403)
+
+purge_test_accounts()
+
 code, classes = req("GET", "/classes", token=teacher_token)
 check("教师获取班级列表", code == 200 and "classes" in classes)
 

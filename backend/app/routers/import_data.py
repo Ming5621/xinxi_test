@@ -5,7 +5,7 @@ from ..auth import get_password_hash, require_teacher
 from ..database import get_db
 from ..import_utils import parse_questions_text, parse_students_text
 from ..models import QuestionType, User, UserRole
-from ..permissions import ensure_class_access
+from ..permissions import active_student_name_taken, ensure_class_access
 from ..schemas import BatchImportRequest, BatchImportResult, QuestionCreate, QuestionParseResult
 
 router = APIRouter(prefix="/api/import", tags=["批量导入"])
@@ -36,6 +36,10 @@ def batch_import_students(
             except HTTPException:
                 errors.append(f"用户名 {item['username']} 班级 {class_name} 无权限，已跳过")
                 continue
+        if active_student_name_taken(db, item["name"], class_name):
+            label = class_name or "（未分班）"
+            errors.append(f"班级 {label} 已有同名学生 {item['name']}，已跳过")
+            continue
         user = User(
             username=item["username"],
             password_hash=get_password_hash(item["password"]),

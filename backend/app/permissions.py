@@ -93,6 +93,19 @@ def teacher_ids_for_class(db, class_name: str) -> list[int]:
     return [t.id for t in teachers if class_name in (t.assigned_classes or [])]
 
 
+def active_student_name_taken(db, name: str, class_name: str, exclude_id: int | None = None) -> bool:
+    """同一班级的在读学生姓名必须唯一，否则姓名登录无法区分。"""
+    query = db.query(User).filter(
+        User.role == UserRole.student,
+        User.name == name,
+        User.class_name == class_name,
+        User.is_active == True,  # noqa: E712
+    )
+    if exclude_id is not None:
+        query = query.filter(User.id != exclude_id)
+    return query.first() is not None
+
+
 def can_manage_typing_text(user: User, text) -> bool:
     if user.role == UserRole.admin:
         return True
