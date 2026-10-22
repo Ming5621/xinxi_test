@@ -54,7 +54,7 @@ def get_standards():
     return TypingStandardsOut(
         levels=TYPING_LEVELS,
         min_accuracy=95,
-        description="参考中考信息技术（10字/分）及义务教育信息科技课标（30字/分、准确率95%）",
+        description="参考中考信息技术（10字/分）及义务教育信息科技课标（30字/分）。良好、优秀、卓越须准确率≥95%",
     )
 
 
@@ -528,7 +528,8 @@ def submit_typing(
 
     comparison = compare_text(reference_text, data.typed_text)
     wpm = calculate_wpm(comparison["correct_chars"], data.duration_seconds)
-    level_info = get_typing_level(wpm)
+    min_accuracy = DEFAULT_TYPING_CONFIG["min_accuracy"]
+    level_info = get_typing_level(wpm, comparison["accuracy"], min_accuracy)
     score, passed, remark = score_typing_question(
         wpm, comparison["accuracy"], 100, DEFAULT_TYPING_CONFIG
     )
@@ -580,7 +581,9 @@ def _record_to_out(record: TypingRecord) -> TypingRecordOut:
         wpm=record.wpm,
         accuracy=record.accuracy,
         correct_chars=record.correct_chars,
-        level=record.level,
+        level=get_typing_level(
+            record.wpm, record.accuracy, DEFAULT_TYPING_CONFIG["min_accuracy"]
+        )["level"],
         duration_seconds=record.duration_seconds,
         score=score,
         created_at=record.created_at,
@@ -669,7 +672,10 @@ def class_stats(
                 for r in records
             ]
             avg_score = round(sum(scores) / len(scores), 1)
-            latest_level = records[0].level
+            latest = records[0]
+            latest_level = get_typing_level(
+                latest.wpm, latest.accuracy, DEFAULT_TYPING_CONFIG["min_accuracy"]
+            )["level"]
             total_count = db.query(TypingRecord).filter(TypingRecord.student_id == s.id).count()
         else:
             avg_wpm = best_wpm = avg_acc = avg_score = 0

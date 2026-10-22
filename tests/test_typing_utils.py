@@ -48,9 +48,37 @@ score3, _, _ = score_typing_question(30, 70, 18)
 check("打字评分-低准确率", score3 < 10, f"score={score3}")
 
 # get_typing_level
-check("等级-卓越", get_typing_level(45)["level"] == "卓越")
-check("等级-达标", get_typing_level(15)["level"] == "达标")
-check("等级-未达标", get_typing_level(5)["level"] == "未达标")
+check("等级-卓越", get_typing_level(45, 100)["level"] == "卓越")
+check("等级-达标", get_typing_level(15, 100)["level"] == "达标")
+check("等级-未达标", get_typing_level(5, 100)["level"] == "未达标")
+check("准确率95可评卓越", get_typing_level(40, 95)["level"] == "卓越")
+low_level = get_typing_level(45, 8.5)
+check(
+    "高速低准确率不得卓越",
+    low_level["level"] not in ("良好", "优秀", "卓越") and low_level["level"] == "达标",
+    low_level["level"],
+)
+check("准确率94.9高速仅为达标", get_typing_level(40, 94.9)["level"] == "达标")
+check("中速低准确率保持达标", get_typing_level(15, 50)["level"] == "达标")
+check("低速低准确率未达标", get_typing_level(5, 8.5)["level"] == "未达标")
+
+# 长文只打对一小段：速度高、准确率约 8.5%，不能记为卓越
+partial = compare_text("测" * 200, "测" * 17)
+partial_wpm = calculate_wpm(partial["correct_chars"], 10)
+partial_level = get_typing_level(partial_wpm, partial["accuracy"])
+_, partial_passed, partial_remark = score_typing_question(partial_wpm, partial["accuracy"], 100)
+check(
+    "8.5%准确率高速成绩不得卓越",
+    partial["accuracy"] == 8.5
+    and partial_wpm >= 40
+    and partial_level["level"] != "卓越"
+    and partial_level["level"] not in ("良好", "优秀", "卓越")
+    and not partial_passed
+    and "卓越" not in partial_remark
+    and "良好" not in partial_remark
+    and "优秀" not in partial_remark,
+    f"acc={partial['accuracy']} wpm={partial_wpm} level={partial_level['level']} remark={partial_remark}",
+)
 
 # parse_students_text
 students, errs = parse_students_text("s01,张三,1班,123\ns02,李四,2班,", "000000")
