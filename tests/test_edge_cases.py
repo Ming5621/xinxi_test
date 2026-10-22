@@ -42,6 +42,11 @@ def login(username, password):
     return data["access_token"] if code == 200 else None
 
 
+def student_login(name, class_name="课堂"):
+    code, data = req("POST", "/auth/student-login", {"name": name, "class_name": class_name})
+    return data["access_token"] if code == 200 else None
+
+
 def check(name, condition, detail=""):
     global passed, failed
     if condition:
@@ -58,9 +63,9 @@ print("=" * 50)
 print("边界情况测试")
 print("=" * 50)
 
-teacher = login("teacher", "teacher123")
-student = login("student01", "123456")
-student2 = login("student02", "123456")
+teacher = login("teacher1", "teacher123")
+student = student_login("边界甲")
+student2 = student_login("王芳")
 
 # Bug 1: 空考试提交
 code, exam = req("POST", "/exams", {
@@ -76,7 +81,7 @@ code, sessions = req("GET", "/exams/sessions/my", token=student)
 if sessions:
     sid = sessions[0]["id"]
     code, _ = req("GET", f"/exams/sessions/{sid}", token=student2)
-    # student2 should not access student01's session if different
+    # student2 should not access student's session if different
     if sessions[0].get("student_id"):
         check("学生不能查看他人成绩", code == 403 or code == 404, f"code={code}")
 
@@ -96,7 +101,7 @@ code, exam = req("POST", "/exams", {
 long_exam_id = exam.get("id")
 req("POST", f"/exams/{long_exam_id}/publish", token=teacher)
 
-# 用 student02 做测试避免重复提交
+# 用 student2 做测试避免重复提交
 req("POST", f"/exams/{long_exam_id}/start", token=student2)
 code, qs = req("GET", f"/exams/{long_exam_id}/questions", token=student2)
 long_text = qs[0]["content"] if qs else ""
@@ -127,11 +132,13 @@ code, exam = req("POST", "/exams", {
 }, token=teacher)
 judge_id = exam.get("id")
 req("POST", f"/exams/{judge_id}/publish", token=teacher)
-req("POST", f"/exams/{judge_id}/start", token=student2)
-code, qs = req("GET", f"/exams/{judge_id}/questions", token=student2)
+# 新学生避免重复开考冲突
+student3 = student_login("边界丙")
+req("POST", f"/exams/{judge_id}/start", token=student3)
+code, qs = req("GET", f"/exams/{judge_id}/questions", token=student3)
 code, result = req("POST", f"/exams/{judge_id}/submit", {
     "answers": [{"question_id": qs[0]["id"], "student_answer": "正确"}]
-}, token=student2)
+}, token=student3)
 check("判断题提交得分", result.get("total_score") == 10 if code == 200 else False, str(result))
 req("DELETE", f"/exams/{judge_id}", token=teacher)
 
@@ -149,7 +156,8 @@ code, exam = req("POST", "/exams", {
 }, token=teacher)
 end_id = exam.get("id")
 req("POST", f"/exams/{end_id}/publish", token=teacher)
-req("POST", f"/exams/{end_id}/start", token=student2)
+student_wang = student_login("王芳")
+req("POST", f"/exams/{end_id}/start", token=student_wang)
 code, _ = req("POST", f"/exams/{end_id}/end", token=teacher)
 check("结束考试", code == 200)
 code, sessions = req("GET", f"/exams/{end_id}/sessions", token=teacher)
@@ -193,11 +201,12 @@ code, exam = req("POST", "/exams", {
 }, token=teacher)
 nometa_id = exam.get("id")
 req("POST", f"/exams/{nometa_id}/publish", token=teacher)
-req("POST", f"/exams/{nometa_id}/start", token=student2)
-code, qs = req("GET", f"/exams/{nometa_id}/questions", token=student2)
+student4 = student_login("边界丁")
+req("POST", f"/exams/{nometa_id}/start", token=student4)
+code, qs = req("GET", f"/exams/{nometa_id}/questions", token=student4)
 code, result = req("POST", f"/exams/{nometa_id}/submit", {
     "answers": [{"question_id": qs[0]["id"], "student_answer": "测试文本"}]
-}, token=student2)
+}, token=student4)
 check("无meta打字题自动评分", code == 200 and result.get("total_score", 0) > 3.6,
       f"score={result.get('total_score')}")
 req("DELETE", f"/exams/{nometa_id}", token=teacher)

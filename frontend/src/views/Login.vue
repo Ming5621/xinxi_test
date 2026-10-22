@@ -30,13 +30,36 @@
       </div>
 
       <div class="login-card">
-        <h2>用户登录</h2>
-        <p class="login-subtitle">请输入您的账号和密码</p>
+        <h2>开始使用</h2>
+        <p class="login-subtitle">{{ mode === 'student' ? '输入姓名即可进入' : '教师登录' }}</p>
 
-        <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
+        <div class="mode-switch">
+          <button type="button" class="mode-btn" :class="{ active: mode === 'student' }" @click="mode = 'student'">学生</button>
+          <button type="button" class="mode-btn" :class="{ active: mode === 'teacher' }" @click="mode = 'teacher'">教师</button>
+        </div>
+
+        <el-form v-if="mode === 'student'" ref="studentFormRef" :model="studentForm" :rules="studentRules" @submit.prevent="handleStudentLogin">
+          <el-form-item prop="name">
+            <el-input
+              v-model="studentForm.name"
+              placeholder="请输入姓名"
+              size="large"
+              :prefix-icon="User"
+              maxlength="40"
+              @keyup.enter="handleStudentLogin"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" size="large" :loading="loading" class="login-btn" @click="handleStudentLogin">
+              进入系统
+            </el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-form v-else ref="teacherFormRef" :model="teacherForm" :rules="teacherRules" @submit.prevent="handleTeacherLogin">
           <el-form-item prop="username">
             <el-input
-              v-model="form.username"
+              v-model="teacherForm.username"
               placeholder="用户名"
               size="large"
               :prefix-icon="User"
@@ -44,33 +67,21 @@
           </el-form-item>
           <el-form-item prop="password">
             <el-input
-              v-model="form.password"
+              v-model="teacherForm.password"
               type="password"
               placeholder="密码"
               size="large"
               :prefix-icon="Lock"
               show-password
-              @keyup.enter="handleLogin"
+              @keyup.enter="handleTeacherLogin"
             />
           </el-form-item>
           <el-form-item>
-            <el-button
-              type="primary"
-              size="large"
-              :loading="loading"
-              class="login-btn"
-              @click="handleLogin"
-            >
+            <el-button type="primary" size="large" :loading="loading" class="login-btn" @click="handleTeacherLogin">
               登 录
             </el-button>
           </el-form-item>
         </el-form>
-
-        <div class="login-hint">
-          <p>管理员: <code>admin</code> / <code>admin123</code></p>
-          <p>教师账号: <code>teacher</code> / <code>teacher123</code></p>
-          <p>学生账号: <code>student01</code> / <code>123456</code></p>
-        </div>
       </div>
     </div>
 
@@ -88,11 +99,18 @@ import CopyrightFooter from '@/components/CopyrightFooter.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
-const formRef = ref()
+const mode = ref('student')
+const studentFormRef = ref()
+const teacherFormRef = ref()
 const loading = ref(false)
 
-const form = reactive({ username: '', password: '' })
-const rules = {
+const studentForm = reactive({ name: '' })
+const teacherForm = reactive({ username: '', password: '' })
+
+const studentRules = {
+  name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+}
+const teacherRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
@@ -103,11 +121,23 @@ function homePath(role) {
   return '/student'
 }
 
-async function handleLogin() {
-  await formRef.value.validate()
+async function handleStudentLogin() {
+  await studentFormRef.value.validate()
   loading.value = true
   try {
-    const user = await auth.login(form.username, form.password)
+    const user = await auth.studentLogin(studentForm.name.trim())
+    ElMessage.success(`欢迎，${user.name}！`)
+    router.push(homePath(user.role))
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleTeacherLogin() {
+  await teacherFormRef.value.validate()
+  loading.value = true
+  try {
+    const user = await auth.login(teacherForm.username.trim(), teacherForm.password)
     ElMessage.success(`欢迎回来，${user.name}！`)
     router.push(homePath(user.role))
   } finally {
@@ -212,7 +242,35 @@ async function handleLogin() {
 .login-subtitle {
   color: #6b7280;
   font-size: 14px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 4px;
+  background: #f3f4f6;
+  border-radius: 12px;
+}
+
+.mode-btn {
+  border: none;
+  background: transparent;
+  height: 40px;
+  border-radius: 10px;
+  font-size: 15px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  background: white;
+  color: #4f46e5;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 .login-btn {
@@ -220,21 +278,6 @@ async function handleLogin() {
   height: 44px;
   font-size: 16px;
   border-radius: 10px;
-}
-
-.login-hint {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid #f3f4f6;
-  font-size: 13px;
-  color: #9ca3af;
-}
-
-.login-hint code {
-  background: #f3f4f6;
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: #4f46e5;
 }
 
 .login-footer {

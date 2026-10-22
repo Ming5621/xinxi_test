@@ -20,7 +20,7 @@ const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
 
-await login(page, 'teacher', 'teacher123')
+await page.goto(`${BASE}/login`); await page.evaluate(() => localStorage.clear()); await page.reload(); await page.waitForLoadState('networkidle'); await page.locator('button.mode-btn', { hasText: '教师' }).click(); await page.locator('input').first().fill('teacher1'); await page.locator('input[type="password"]').fill('teacher123'); await page.locator('button').filter({ hasText: '登' }).click(); await page.waitForTimeout(1500)
 await page.goto(`${BASE}/teacher/exams`)
 await page.waitForTimeout(800)
 
@@ -34,7 +34,7 @@ if (await publishBtn.count()) {
   await page.waitForTimeout(800)
 }
 
-await login(page, 'student03', '123456')
+await page.goto(`${BASE}/login`); await page.evaluate(() => localStorage.clear()); await page.reload(); await page.waitForLoadState('networkidle'); await page.locator('input').first().fill('调试学生'); await page.locator('button').filter({ hasText: '进入系统' }).click(); await page.waitForTimeout(1500)
 await page.goto(`${BASE}/student`)
 await page.waitForTimeout(1000)
 

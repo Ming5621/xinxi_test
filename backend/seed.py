@@ -12,6 +12,14 @@ from app.models import Exam, ExamStatus, Question, QuestionType, TypingDifficult
 
 Base.metadata.create_all(bind=engine)
 
+SHARED_CLASS = "课堂"
+TEACHER_ACCOUNTS = [
+    ("teacher1", "张老师", "teacher123"),
+    ("teacher2", "李老师", "teacher123"),
+    ("teacher3", "王老师", "teacher123"),
+    ("teacher4", "赵老师", "teacher123"),
+]
+
 # 兼容旧数据库：补充新增字段
 inspector = inspect(engine)
 if "answers" in inspector.get_table_names():
@@ -19,9 +27,6 @@ if "answers" in inspector.get_table_names():
     with engine.begin() as conn:
         if "answer_meta" not in cols:
             conn.execute(text("ALTER TABLE answers ADD COLUMN answer_meta JSON DEFAULT '{}'"))
-        if "student_answer" in cols:
-            # SQLite 无法直接改类型，新库会直接用 Text
-            pass
 
 if "users" in inspector.get_table_names():
     user_cols = {c["name"] for c in inspector.get_columns("users")}
@@ -60,80 +65,60 @@ if db.query(User).filter(User.username == "admin").first() is None:
     db.commit()
     print("✓ 创建管理员账号: admin / admin123")
 
-if db.query(User).filter(User.username == "teacher").first() is None:
-    teacher = User(
-        username="teacher",
-        password_hash=get_password_hash("teacher123"),
-        name="张老师",
-        role=UserRole.teacher,
-        assigned_classes=["微机1班"],
-    )
-    db.add(teacher)
-    db.commit()
-    print("✓ 创建教师账号: teacher / teacher123 (管理微机1班)")
-else:
-    teacher = db.query(User).filter(User.username == "teacher").first()
-    if teacher and not teacher.assigned_classes:
-        teacher.assigned_classes = ["微机1班"]
-        db.commit()
-
-if db.query(User).filter(User.username == "teacher2").first() is None:
-    db.add(
-        User(
-            username="teacher2",
-            password_hash=get_password_hash("teacher123"),
-            name="李老师",
-            role=UserRole.teacher,
-            assigned_classes=["微机2班"],
-        )
-    )
-    db.commit()
-    print("✓ 创建教师账号: teacher2 / teacher123 (管理微机2班)")
-
-students_data = [
-    ("student01", "李明", "微机1班"),
-    ("student02", "王芳", "微机1班"),
-    ("student03", "赵强", "微机1班"),
-    ("student04", "刘洋", "微机2班"),
-    ("student05", "陈静", "微机2班"),
-]
-
-for username, name, class_name in students_data:
-    if db.query(User).filter(User.username == username).first() is None:
+# 四个教师账号，统一管理「课堂」班级（学生姓名登录后进入该班）
+for username, name, password in TEACHER_ACCOUNTS:
+    existing = db.query(User).filter(User.username == username).first()
+    if existing is None:
         db.add(
             User(
                 username=username,
-                password_hash=get_password_hash("123456"),
+                password_hash=get_password_hash(password),
                 name=name,
-                role=UserRole.student,
-                class_name=class_name,
+                role=UserRole.teacher,
+                assigned_classes=[SHARED_CLASS],
             )
         )
-        print(f"✓ 创建学生账号: {username} / 123456 ({name})")
+        print(f"✓ 创建教师账号: {username} / {password} ({name})")
+    else:
+        existing.role = UserRole.teacher
+        existing.name = name
+        existing.assigned_classes = [SHARED_CLASS]
+        existing.is_active = True
+        print(f"✓ 更新教师账号: {username} → 管理「{SHARED_CLASS}」")
+
+# 兼容旧 teacher / teacher2：改为指向课堂，或保留但同步班级
+for old_name in ("teacher", "teacher2"):
+    old = db.query(User).filter(User.username == old_name).first()
+    if old and old.role == UserRole.teacher:
+        old.assigned_classes = [SHARED_CLASS]
+        print(f"✓ 兼容旧账号 {old_name}：班级改为「{SHARED_CLASS}」")
 
 db.commit()
 
-# 打字练习素材：绑定到教师账号
-teacher = db.query(User).filter(User.username == "teacher").first()
-teacher2 = db.query(User).filter(User.username == "teacher2").first()
+teachers = (
+    db.query(User)
+    .filter(User.role == UserRole.teacher, User.username.in_([t[0] for t in TEACHER_ACCOUNTS]))
+    .order_by(User.username)
+    .all()
+)
+primary_teacher = teachers[0] if teachers else db.query(User).filter(User.role == UserRole.teacher).first()
 
-# 兼容旧数据：无归属的素材划给默认教师
+# 打字练习素材：绑定到各教师账号
 orphans = db.query(TypingText).filter(TypingText.teacher_id.is_(None)).all()
-if orphans and teacher:
+if orphans and primary_teacher:
     for t in orphans:
-        t.teacher_id = teacher.id
+        t.teacher_id = primary_teacher.id
     db.commit()
-    print(f"✓ 已将 {len(orphans)} 篇旧练习素材绑定到教师 teacher")
+    print(f"✓ 已将 {len(orphans)} 篇旧练习素材绑定到 {primary_teacher.username}")
 
-if db.query(TypingText).count() == 0 and teacher:
+if db.query(TypingText).count() == 0 and teachers:
     samples = [
         ("入门练习 — 键盘指法", "aaaa ssss dddd ffff jjjj kkkk llll ;;;; 中中中中 国国国国 人人人人", TypingDifficulty.beginner, 60),
         ("基础练习 — 信息技术词汇", "计算机 键盘 鼠标 显示器 主机 软件 硬件 网络 浏览器 文件夹 复制 粘贴 删除 保存 打印", TypingDifficulty.basic, 90),
         ("达标练习 — 中考模拟", "信息技术是一门研究信息获取、存储、传输和处理的学科。计算机由硬件系统和软件系统组成。操作系统是管理计算机硬件与软件资源的系统软件。", TypingDifficulty.standard, 120),
         ("进阶练习 — 课文段落", "科学技术的飞速发展，使计算机网络成为人们生活中不可缺少的工具。通过网络，我们可以获取丰富的学习资源，与世界各地的人进行交流。作为新时代的中学生，我们应该掌握基本的信息技术技能，培养良好的信息素养。", TypingDifficulty.advanced, 180),
     ]
-    owners = [t for t in (teacher, teacher2) if t]
-    for owner in owners:
+    for owner in teachers:
         for title, content, diff, limit in samples:
             db.add(
                 TypingText(
@@ -146,16 +131,15 @@ if db.query(TypingText).count() == 0 and teacher:
                 )
             )
     db.commit()
-    print(f"✓ 创建打字练习素材 {len(samples) * len(owners)} 篇（已按教师账号绑定）")
+    print(f"✓ 创建打字练习素材 {len(samples) * len(teachers)} 篇（已按教师账号绑定）")
 
-if db.query(Exam).count() == 0:
-    teacher = db.query(User).filter(User.username == "teacher").first()
+if db.query(Exam).count() == 0 and primary_teacher:
     exam = Exam(
         title="计算机基础知识测验",
         description="本次考试涵盖计算机硬件、操作系统及网络基础知识，包含选择题和判断题。",
         duration_minutes=45,
         pass_score=30,
-        created_by=teacher.id,
+        created_by=primary_teacher.id,
     )
     db.add(exam)
     db.flush()
@@ -213,15 +197,13 @@ if db.query(Exam).count() == 0:
     db.commit()
     print("✓ 创建示例考试: 计算机基础知识测验（草稿状态）")
 
-# 打字测试专项考试
-if db.query(Exam).filter(Exam.title == "初中信息技术打字测试").first() is None:
-    teacher = db.query(User).filter(User.username == "teacher").first()
+if db.query(Exam).filter(Exam.title == "初中信息技术打字测试").first() is None and primary_teacher:
     typing_exam = Exam(
         title="初中信息技术打字测试",
         description="参考中考信息技术及义务教育信息科技课标。达标：10字/分；良好：20字/分；优秀：30字/分；卓越：40字/分。准确率需≥95%。",
         duration_minutes=15,
         pass_score=11,
-        created_by=teacher.id,
+        created_by=primary_teacher.id,
     )
     db.add(typing_exam)
     db.flush()
@@ -249,3 +231,5 @@ if db.query(Exam).filter(Exam.title == "初中信息技术打字测试").first()
 
 db.close()
 print("\n数据库初始化完成！")
+print("教师账号: teacher1~teacher4 / teacher123")
+print("学生: 登录页输入姓名即可（无需预设账号）")

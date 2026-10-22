@@ -12,6 +12,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class StudentLoginRequest(BaseModel):
+    name: str
+    class_name: str = "课堂"
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

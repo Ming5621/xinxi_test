@@ -32,9 +32,9 @@ def main():
     print(f"\n服务器启动中...")
     print(f"  教师机访问: http://localhost:{port}")
     print(f"  学生机访问: http://{ip}:{port}")
-    print(f"\n默认账号:")
-    print(f"  教师: teacher / teacher123")
-    print(f"  学生: student01 / 123456")
+    print(f"\n登录说明:")
+    print(f"  教师: teacher1~teacher4 / teacher123")
+    print(f"  学生: 登录页输入姓名即可（无需预设账号）")
     print("=" * 50)
 
     import uvicorn

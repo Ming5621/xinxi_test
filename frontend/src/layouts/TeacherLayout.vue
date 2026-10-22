@@ -22,7 +22,7 @@
         </el-menu-item>
         <el-menu-item index="/teacher/students">
           <el-icon><User /></el-icon>
-          <span>学生管理</span>
+          <span>学生动态</span>
         </el-menu-item>
         <el-menu-item index="/teacher/exams">
           <el-icon><Document /></el-icon>

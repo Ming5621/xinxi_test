@@ -1,8 +1,8 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1>学生管理</h1>
-      <p>管理学生账号信息</p>
+      <h1>学生动态</h1>
+      <p>学生输入姓名登录后自动出现；可查看在线状态并发任务测试</p>
     </div>
 
     <div class="content-card">

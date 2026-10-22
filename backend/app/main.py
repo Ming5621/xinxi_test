@@ -9,7 +9,7 @@ from .routers import auth, classes, exams, export_data, import_data, presence, s
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="微机教室考试系统", version="1.2.5")
+app = FastAPI(title="微机教室考试系统", version="1.2.6")
 
 app.add_middleware(
     CORSMiddleware,
