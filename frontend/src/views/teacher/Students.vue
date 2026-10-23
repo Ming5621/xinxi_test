@@ -111,6 +111,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { presenceApi, userApi, importApi, exportApi, classApi } from '@/api'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import ClassFilter from '@/components/ClassFilter.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const studentTemplate = `用户名,姓名,班级,密码
 student06,张三,微机1班,123456
@@ -148,8 +149,7 @@ const onlineCount = computed(() => students.value.filter((s) => s.is_online).len
 let refreshTimer = null
 
 function formatLastSeen(value) {
-  if (!value) return '从未登录'
-  return new Date(value).toLocaleString('zh-CN')
+  return formatDateTime(value, '从未登录')
 }
 
 function showDialog(row = null) {

@@ -52,13 +52,14 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { examApi } from '@/api'
+import { formatDateTime } from '@/utils/datetime'
 
 const route = useRoute()
 const loading = ref(true)
 const session = ref(null)
 
 function formatDate(d) {
-  return new Date(d).toLocaleString('zh-CN')
+  return formatDateTime(d)
 }
 
 onMounted(async () => {

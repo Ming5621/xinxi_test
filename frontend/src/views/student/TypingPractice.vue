@@ -152,6 +152,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { typingApi } from '@/api'
 import TypingTest from '@/components/TypingTest.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
 const texts = ref([])
@@ -180,7 +181,7 @@ function levelColor(level) {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleString('zh-CN')
+  return formatDateTime(value)
 }
 
 async function loadHistory() {

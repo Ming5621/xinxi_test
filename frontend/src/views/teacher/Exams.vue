@@ -52,6 +52,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { examApi } from '@/api'
+import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
 const exams = ref([])
@@ -66,7 +67,7 @@ const filteredExams = computed(() => {
 })
 
 function formatDate(d) {
-  return new Date(d).toLocaleString('zh-CN')
+  return formatDateTime(d)
 }
 
 async function handlePublish(row) {

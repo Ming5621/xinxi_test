@@ -59,12 +59,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { examApi } from '@/api'
+import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
 const sessions = ref([])
 
 function formatDate(d) {
-  return new Date(d).toLocaleString('zh-CN')
+  return formatDateTime(d)
 }
 
 onMounted(async () => {

@@ -118,6 +118,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { statsApi, examApi, presenceApi } from '@/api'
+import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
 const stats = ref({})
@@ -138,8 +139,7 @@ const statCards = computed(() => [
 ])
 
 function formatTime(value) {
-  if (!value) return '—'
-  return new Date(value).toLocaleString('zh-CN')
+  return formatDateTime(value)
 }
 
 async function publishExam(row) {

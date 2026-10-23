@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -8,6 +8,7 @@ from ..database import get_db
 from ..models import User, UserRole
 from ..permissions import apply_student_scope, filter_class_name
 from ..schemas import PresenceSummary, StudentPresenceOut
+from ..timeutil import utc_now
 
 router = APIRouter(prefix="/api/presence", tags=["在线状态"])
 
@@ -17,7 +18,7 @@ ONLINE_THRESHOLD_SECONDS = 45
 def _is_online(last_seen_at: datetime | None) -> bool:
     if not last_seen_at:
         return False
-    return (datetime.utcnow() - last_seen_at).total_seconds() <= ONLINE_THRESHOLD_SECONDS
+    return (utc_now() - last_seen_at).total_seconds() <= ONLINE_THRESHOLD_SECONDS
 
 
 def _student_presence(user: User) -> StudentPresenceOut:
@@ -37,7 +38,7 @@ def heartbeat(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_student),
 ):
-    current_user.last_seen_at = datetime.utcnow()
+    current_user.last_seen_at = utc_now()
     db.commit()
     return {"ok": True}
 
