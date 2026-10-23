@@ -81,8 +81,8 @@
         </template>
       </div>
 
-      <div class="question-nav">
-        <el-button type="button" :disabled="currentIndex === 0" @click.left="goPrev">
+      <div class="question-nav" @wheel="onNavWheel">
+        <el-button type="button" tabindex="-1" :disabled="currentIndex === 0" @click="goPrev">
           <el-icon><ArrowLeft /></el-icon> 上一题
         </el-button>
         <div class="nav-dots">
@@ -91,25 +91,27 @@
             :key="q.id"
             class="dot"
             :class="{ active: i === currentIndex, answered: isAnswered(q) }"
-            @click.left="goToQuestion(i)"
+            @click="goToQuestion(i)"
           />
         </div>
+        <!-- 两个按钮同时留在页面上，避免「下一题」被换成「提交」时焦点跟着过去 -->
         <el-button
-          v-if="currentIndex < questions.length - 1"
+          v-show="currentIndex < questions.length - 1"
           type="primary"
           native-type="button"
-          @click.left="goNext"
+          tabindex="-1"
+          @click="goNext"
         >
           下一题 <el-icon><ArrowRight /></el-icon>
         </el-button>
-        <!-- 仅响应鼠标左键；切题后主动失焦，避免滚轮/空格误触提交 -->
         <el-button
-          v-else
+          v-show="currentIndex >= questions.length - 1"
           type="success"
           native-type="button"
+          tabindex="-1"
           :loading="submitting"
           class="submit-exam-btn"
-          @click.left="handleSubmit"
+          @click="handleSubmit"
         >
           提交试卷 <el-icon><Check /></el-icon>
         </el-button>
@@ -137,7 +139,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { examApi } from '@/api'
@@ -160,6 +162,58 @@ const draftKey = `exam_draft_${examId}`
 let timer = null
 
 const currentQuestion = computed(() => questions.value[currentIndex.value])
+
+// 滚轮会让仍聚焦的按钮收到 click（detail 常为 0，且没有按下主键）。
+// 只接受「刚发生过的鼠标左键按下」触发的点击，并在滚轮后短暂忽略按钮点击。
+const WHEEL_CLICK_GUARD_MS = 600
+let lastWheelAt = 0
+let armedButton = null
+let armedAt = 0
+
+function buttonFromEvent(event) {
+  const target = event?.target
+  if (!(target instanceof Element)) return null
+  return target.closest('button, .el-button')
+}
+
+function inGuardedZone(button) {
+  return !!button?.closest('.exam-take, .el-message-box')
+}
+
+function onPointerDownCapture(event) {
+  if (event.button !== 0) return
+  const button = buttonFromEvent(event)
+  if (!inGuardedZone(button)) return
+  armedButton = button
+  armedAt = Date.now()
+}
+
+function onWheelCapture() {
+  lastWheelAt = Date.now()
+  armedButton = null
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.closest('button, .el-button')) {
+    active.blur()
+  }
+}
+
+function onClickCapture(event) {
+  const button = buttonFromEvent(event)
+  if (!inGuardedZone(button)) return
+  const wheeled = Date.now() - lastWheelAt < WHEEL_CLICK_GUARD_MS
+  const armed = armedButton === button && Date.now() - armedAt < 2000
+  if (wheeled || !armed || event.detail === 0) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+  }
+  armedButton = null
+}
+
+function onNavWheel(event) {
+  event.preventDefault()
+  onWheelCapture()
+}
 
 const typeLabel = { choice: '选择题', judge: '判断题', typing: '打字题' }
 const typeTag = { choice: '', judge: 'warning', typing: 'success' }
@@ -235,6 +289,9 @@ function onTypingComplete(qId, data) {
 }
 
 onMounted(async () => {
+  window.addEventListener('pointerdown', onPointerDownCapture, true)
+  window.addEventListener('wheel', onWheelCapture, { capture: true, passive: true })
+  window.addEventListener('click', onClickCapture, true)
   try {
     const session = await examApi.start(examId)
     sessionStartTime.value = session.start_time
@@ -272,29 +329,31 @@ onMounted(async () => {
 
 watch([answers, answerMeta, currentIndex], saveDraft, { deep: true })
 
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  window.removeEventListener('pointerdown', onPointerDownCapture, true)
+  window.removeEventListener('wheel', onWheelCapture, true)
+  window.removeEventListener('click', onClickCapture, true)
+})
 
-/** 切题后去掉按钮焦点，防止「下一题」变成「提交」后滚轮/空格误触发 */
 function blurActive() {
-  nextTick(() => {
-    const el = document.activeElement
-    if (el instanceof HTMLElement) el.blur()
-  })
+  const el = document.activeElement
+  if (el instanceof HTMLElement) el.blur()
 }
 
 function goPrev() {
-  if (currentIndex.value > 0) currentIndex.value -= 1
   blurActive()
+  if (currentIndex.value > 0) currentIndex.value -= 1
 }
 
 function goNext() {
-  if (currentIndex.value < questions.value.length - 1) currentIndex.value += 1
   blurActive()
+  if (currentIndex.value < questions.value.length - 1) currentIndex.value += 1
 }
 
 function goToQuestion(i) {
-  currentIndex.value = i
   blurActive()
+  currentIndex.value = i
 }
 
 async function autoSubmit() {
@@ -303,10 +362,10 @@ async function autoSubmit() {
 }
 
 async function handleSubmit(evt) {
-  // 忽略非主键点击、中键滚轮按下等
   if (evt && typeof evt.button === 'number' && evt.button !== 0) return
+  if (evt && evt.detail === 0) return
+  if (Date.now() - lastWheelAt < WHEEL_CLICK_GUARD_MS) return
   try {
-    // 先失焦，避免确认框默认按钮被滚轮/空格误点
     blurActive()
     const unanswered = questions.value.filter((q) => !isAnswered(q))
     const boxOpts = {

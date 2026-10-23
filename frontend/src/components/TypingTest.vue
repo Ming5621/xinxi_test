@@ -8,7 +8,15 @@
       <span v-if="paused" class="paused-tag">已暂停</span>
     </div>
 
-    <div class="article-box" ref="articleRef">
+    <div
+      class="article-box"
+      ref="articleRef"
+      @copy="blockArticleClipboard"
+      @cut="blockArticleClipboard"
+      @contextmenu.prevent
+      @dragstart.prevent
+      @selectstart.prevent
+    >
       <span
         v-for="(char, i) in referenceChars"
         :key="i"
@@ -26,6 +34,8 @@
         :placeholder="started ? '请开始输入...' : '开始后在此输入'"
         @input="onInput"
         @keydown="onKeydown"
+        @paste.prevent
+        @drop.prevent
       />
     </div>
 
@@ -257,6 +267,13 @@ function onKeydown(e) {
   if (e.key === 'Tab') e.preventDefault()
 }
 
+/** 对照文章禁止复制、剪切；剪贴板不写入原文 */
+function blockArticleClipboard(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  e.clipboardData?.setData('text/plain', '')
+}
+
 function finish() {
   if (finished.value) return
   clearInterval(timer)
@@ -359,6 +376,15 @@ defineExpose({ reset, start, pause, resume, stop, started, finished, paused, res
   overflow-y: auto;
   overflow-wrap: anywhere;
   color: #374151;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.article-box,
+.article-box * {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .typing-panel.expanded .article-box {

@@ -170,6 +170,34 @@ await page.setViewportSize({ width: 1440, height: 900 })
 await page.locator('button:has-text("开始打字")').click()
 await page.waitForTimeout(500)
 check('开始打字', await page.locator('textarea.input-box').isEnabled())
+
+const userSelect = await page.locator('.article-box').evaluate((el) => getComputedStyle(el).userSelect)
+check('对照文章禁止选中', userSelect === 'none', userSelect)
+await page.evaluate(() => window.getSelection()?.removeAllRanges())
+const articleBox = await page.locator('.article-box').boundingBox()
+await page.mouse.move(articleBox.x + 24, articleBox.y + 36)
+await page.mouse.down()
+await page.mouse.move(articleBox.x + Math.min(articleBox.width - 16, 320), articleBox.y + 70)
+await page.mouse.up()
+const dragged = await page.evaluate(() => window.getSelection()?.toString() || '')
+check('拖拽对照文章不会形成选区', dragged.length === 0, JSON.stringify(dragged.slice(0, 30)))
+const copyBlocked = await page.locator('.article-box').evaluate((el) => {
+  const data = new DataTransfer()
+  const ev = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: data })
+  const notCanceled = el.dispatchEvent(ev)
+  return !notCanceled && ev.defaultPrevented && data.getData('text/plain') === ''
+})
+check('对照文章复制被拦截', copyBlocked)
+const beforePaste = await page.locator('textarea.input-box').inputValue()
+const pasteBlocked = await page.locator('textarea.input-box').evaluate((el) => {
+  const data = new DataTransfer()
+  data.setData('text/plain', '不应粘贴进来的参考文章')
+  const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data })
+  return !el.dispatchEvent(ev)
+})
+const afterPaste = await page.locator('textarea.input-box').inputValue()
+check('输入框拒绝粘贴', pasteBlocked && afterPaste === beforePaste)
+
 await page.locator('textarea.input-box').fill('aaaa')
 await page.waitForTimeout(300)
 check('暂停按钮显示', await page.locator('.practice-bar button:has-text("暂停")').count() === 1)
@@ -228,7 +256,79 @@ for (const title of ['E2E长文', 'E2E导入短文']) {
   check(`已删除${title}`, await page.locator('.el-table__row', { hasText: title }).count() === 0)
 }
 
-// 15. 控制台错误检查
+// 15. 考试中滚轮不能交卷
+const wheelExam = await page.evaluate(async () => {
+  const token = localStorage.getItem('token')
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const createdRes = await fetch('/api/exams', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      title: '滚轮防误交测试',
+      duration_minutes: 30,
+      pass_score: 60,
+      questions: [
+        { type: 'choice', content: '第一题 1+1=?', options: ['A.1', 'B.2', 'C.3', 'D.4'], correct_answer: 'B', score: 10, order_num: 0 },
+        { type: 'choice', content: '第二题 2+2=?', options: ['A.3', 'B.4', 'C.5', 'D.6'], correct_answer: 'B', score: 10, order_num: 1 },
+        { type: 'judge', content: '地球是圆的', options: ['正确', '错误'], correct_answer: '正确', score: 10, order_num: 2 },
+      ],
+    }),
+  })
+  const created = await createdRes.json()
+  const pub = await fetch(`/api/exams/${created.id}/publish`, { method: 'POST', headers })
+  return { id: created.id, status: pub.status }
+})
+check('发布滚轮测试考试', wheelExam.status === 200 && !!wheelExam.id, JSON.stringify(wheelExam))
+
+await studentLogin(page, '滚轮测试生')
+await page.goto(`${BASE}/student`)
+await page.waitForTimeout(800)
+await page.locator('.exam-card', { hasText: '滚轮防误交测试' }).locator('button:has-text("开始考试")').click()
+await page.locator('.el-message-box button:has-text("开始答题")').click()
+await page.waitForURL('**/student/exam/**')
+await page.waitForTimeout(800)
+check('进入考试停在第 1 题', await page.locator('text=第 1 / 3 题').count() >= 1)
+
+const nextBtn = page.locator('button:has-text("下一题")')
+await nextBtn.focus()
+await page.mouse.wheel(0, 900)
+await nextBtn.dispatchEvent('wheel', { deltaY: 480, bubbles: true })
+await nextBtn.dispatchEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 })
+await page.waitForTimeout(400)
+check('滚轮后仍停留在第 1 题', await page.locator('text=第 1 / 3 题').count() >= 1)
+check('滚轮未弹出提交确认', await page.locator('.el-message-box').count() === 0)
+
+await page.waitForTimeout(700)
+await nextBtn.click()
+await page.waitForTimeout(200)
+await nextBtn.click()
+await page.waitForTimeout(300)
+check('可以正常进入最后一题', await page.locator('text=第 3 / 3 题').count() >= 1)
+
+const submitBtn = page.locator('button.submit-exam-btn')
+await submitBtn.focus()
+await page.mouse.wheel(0, 700)
+await submitBtn.dispatchEvent('wheel', { deltaY: 480, bubbles: true })
+await submitBtn.dispatchEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 })
+await page.waitForTimeout(400)
+check('最后一题滚轮不提交', page.url().includes('/exam/') && await page.locator('.el-message-box').count() === 0)
+
+await page.waitForTimeout(700)
+await submitBtn.click()
+await page.waitForTimeout(400)
+check('手动点击才出现提交确认', await page.locator('.el-message-box').count() >= 1)
+const confirmBtn = page.locator('.el-message-box button:has-text("确认提交")')
+await confirmBtn.focus()
+await page.mouse.wheel(0, 500)
+await confirmBtn.dispatchEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 })
+await page.waitForTimeout(400)
+check('确认框滚轮不会交卷', page.url().includes('/exam/'))
+await page.waitForTimeout(700)
+await confirmBtn.click()
+await page.waitForURL('**/student/results**', { timeout: 8000 })
+check('确认后正常提交', page.url().includes('/student/results'))
+
+// 16. 控制台错误检查
 const criticalErrors = consoleErrors.filter(e =>
   e.includes('TypeError') || e.includes('ReferenceError') || e.includes('is not a function')
 )
