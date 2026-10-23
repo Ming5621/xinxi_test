@@ -1,5 +1,4 @@
 import io
-from datetime import datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,6 +10,7 @@ from ..auth import require_teacher
 from ..database import get_db
 from ..models import Exam, ExamSession, SessionStatus, TypingRecord, User, UserRole
 from ..permissions import apply_student_scope, ensure_class_access, filter_class_name, get_assigned_classes
+from ..timeutil import format_local
 from ..typing_utils import DEFAULT_TYPING_CONFIG, get_typing_level
 
 router = APIRouter(prefix="/api/export", tags=["数据导出"])
@@ -57,7 +57,7 @@ def export_students(
             s.name,
             s.class_name,
             "正常" if s.is_active else "禁用",
-            s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "",
+            format_local(s.created_at),
         ])
     suffix = class_name or "全部"
     return _workbook_response(wb, f"学生名单_{suffix}.xlsx")
@@ -107,8 +107,8 @@ def export_exam_results(
             s.total_score if s.status == SessionStatus.submitted else "",
             s.max_score,
             "是" if passed else ("否" if s.status == SessionStatus.submitted else ""),
-            s.start_time.strftime("%Y-%m-%d %H:%M") if s.start_time else "",
-            s.submit_time.strftime("%Y-%m-%d %H:%M") if s.submit_time else "",
+            format_local(s.start_time),
+            format_local(s.submit_time),
         ])
     return _workbook_response(wb, f"考试成绩_{exam.title}.xlsx")
 
@@ -158,7 +158,7 @@ def export_typing_records(
             r.wpm,
             r.accuracy,
             get_typing_level(r.wpm, r.accuracy, DEFAULT_TYPING_CONFIG["min_accuracy"])["level"],
-            r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
+            format_local(r.created_at),
         ])
     suffix = class_name or "全部"
     return _workbook_response(wb, f"打字记录_{suffix}.xlsx")

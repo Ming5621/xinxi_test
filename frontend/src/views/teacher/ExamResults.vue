@@ -84,6 +84,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { examApi, exportApi } from '@/api'
 import ClassFilter from '@/components/ClassFilter.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const route = useRoute()
 const loading = ref(true)
@@ -93,7 +94,7 @@ const detailVisible = ref(false)
 const detail = ref(null)
 
 function formatDate(d) {
-  return new Date(d).toLocaleString('zh-CN')
+  return formatDateTime(d)
 }
 
 function sortByScore(a, b) {

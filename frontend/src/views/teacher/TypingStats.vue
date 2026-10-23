@@ -157,6 +157,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { typingApi, exportApi } from '@/api'
 import ArticleImportDialog from '@/components/ArticleImportDialog.vue'
 import ClassFilter from '@/components/ClassFilter.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
 const stats = ref([])
@@ -194,7 +195,7 @@ function speedColor(wpm) {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleString('zh-CN')
+  return formatDateTime(value)
 }
 
 function difficultyLabel(d) {

@@ -4,6 +4,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from .models import ExamStatus, QuestionType, SessionStatus, TypingClassSessionStatus, TypingDifficulty, UserRole
+from .timeutil import UtcDateTime
 
 
 # Auth
@@ -50,7 +51,7 @@ class UserUpdate(BaseModel):
 class UserOut(UserBase):
     id: int
     is_active: bool
-    created_at: datetime
+    created_at: UtcDateTime
 
     model_config = {"from_attributes": True}
 
@@ -114,9 +115,9 @@ class ExamUpdate(BaseModel):
 class ExamOut(ExamBase):
     id: int
     status: ExamStatus
-    start_time: Optional[datetime]
-    end_time: Optional[datetime]
-    created_at: datetime
+    start_time: Optional[UtcDateTime]
+    end_time: Optional[UtcDateTime]
+    created_at: UtcDateTime
     question_count: int = 0
     total_score: float = 0.0
 
@@ -158,8 +159,8 @@ class SessionOut(BaseModel):
     student_name: str = ""
     class_name: str = ""
     status: SessionStatus
-    start_time: datetime
-    submit_time: Optional[datetime]
+    start_time: UtcDateTime
+    submit_time: Optional[UtcDateTime]
     total_score: float
     max_score: float
     pass_score: float = 60.0
@@ -222,7 +223,7 @@ class StudentPresenceOut(BaseModel):
     class_name: str
     is_active: bool
     is_online: bool
-    last_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[UtcDateTime] = None
 
     model_config = {"from_attributes": True}
 
@@ -332,7 +333,7 @@ class TypingRecordOut(BaseModel):
     level: str
     score: float = 0.0
     duration_seconds: float
-    created_at: datetime
+    created_at: UtcDateTime
 
     model_config = {"from_attributes": True}
 
@@ -360,9 +361,9 @@ class TypingClassSessionOut(BaseModel):
     title: str
     status: TypingClassSessionStatus
     duration_seconds: int
-    started_at: Optional[datetime] = None
-    ended_at: Optional[datetime] = None
-    created_at: datetime
+    started_at: Optional[UtcDateTime] = None
+    ended_at: Optional[UtcDateTime] = None
+    created_at: UtcDateTime
     participant_count: int = 0
     submitted_count: int = 0
 

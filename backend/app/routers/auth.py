@@ -1,7 +1,6 @@
 import re
 import secrets
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -10,6 +9,7 @@ from ..auth import create_access_token, get_current_user, get_password_hash, ver
 from ..database import get_db
 from ..models import User, UserRole
 from ..schemas import LoginRequest, StudentLoginRequest, TokenResponse, UserOut
+from ..timeutil import utc_now
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
@@ -17,7 +17,7 @@ DEFAULT_STUDENT_CLASS = "课堂"
 
 
 def _issue_token(user: User, db: Session) -> TokenResponse:
-    user.last_seen_at = datetime.utcnow()
+    user.last_seen_at = utc_now()
     db.commit()
     db.refresh(user)
     token = create_access_token(data={"sub": str(user.id)})

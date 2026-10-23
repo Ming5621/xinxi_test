@@ -615,6 +615,8 @@ code, presence_list = req("GET", "/presence/students", token=teacher_token)
 check("教师查看学生在线状态", code == 200 and len(presence_list) >= 5)
 online = [s for s in presence_list if s.get("is_online")]
 check("学生登录后显示在线", len(online) >= 1)
+hb_student = next((s for s in presence_list if s.get("is_online") and s.get("last_seen_at")), None)
+check("心跳时间带 UTC 时区标记", bool(hb_student) and str(hb_student["last_seen_at"]).endswith("Z"))
 
 code, summary = req("GET", "/presence/summary", token=teacher_token)
 check("在线汇总", code == 200 and summary.get("online_students", 0) >= 1)

@@ -97,6 +97,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { typingApi } from '@/api'
 import ClassFilter from '@/components/ClassFilter.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
 const creating = ref(false)
@@ -124,7 +125,7 @@ function statusType(s) {
 }
 
 function formatDate(v) {
-  return v ? new Date(v).toLocaleString('zh-CN') : '—'
+  return formatDateTime(v)
 }
 
 async function loadSessions() {
