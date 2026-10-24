@@ -591,6 +591,34 @@ if texts:
         check("教师查看课堂测试成绩", code == 200 and len(detail.get("records", [])) >= 1)
         req("POST", f"/typing/sessions/{session_id}/end", token=teacher_token)
 
+        code, denied = req("GET", f"/export/typing/sessions/{session_id}", token=student_token)
+        check("学生不能导出课堂成绩", code == 403, str(denied))
+
+        session_export = urllib.request.Request(
+            f"{BASE}/export/typing/sessions/{session_id}",
+            headers={"Authorization": f"Bearer {teacher_token}"},
+        )
+        session_body = b""
+        try:
+            with urllib.request.urlopen(session_export, timeout=10) as resp:
+                session_body = resp.read()
+                session_export_ok = resp.status == 200 and "spreadsheet" in resp.headers.get("Content-Type", "")
+        except Exception as exc:
+            session_export_ok = False
+            print(exc)
+        check("导出课堂打字成绩", session_export_ok)
+        if session_export_ok:
+            import io
+            from openpyxl import load_workbook
+            sheet = load_workbook(io.BytesIO(session_body)).active
+            flat = "\n".join(
+                "\t".join("" if cell is None else str(cell) for cell in row)
+                for row in sheet.iter_rows(values_only=True)
+            )
+            check("成绩表含测试名称", "自动化课堂测试" in flat, flat[:300])
+            check("成绩表含已提交学生", "测试生甲" in flat and "已提交" in flat, flat[:500])
+            check("成绩表含未提交学生", "未提交" in flat)
+
 # 10b. Excel 导出
 import urllib.request
 export_req = urllib.request.Request(

@@ -60,14 +60,18 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.8
-          name: 微机教室考试系统 v1.2.8
+          tag_name: v1.2.9
+          name: 微机教室考试系统 v1.2.9
           body: |
             ## 下载说明
 
             解压 **ExamSystem.zip** 到 Windows 教师机，双击 **ExamSystem.exe** 即可启动。
 
             程序会自动选择空闲端口（优先 **18765**），放行防火墙，并自动打开浏览器。
+
+            ### v1.2.9
+            - 课堂 5 分钟打字测试可导出全班成绩（含未提交）
+            - 打字统计导出包含成绩汇总和打字明细
 
             ### v1.2.8
             - 打字对照文章禁止选中、复制和粘贴到输入框

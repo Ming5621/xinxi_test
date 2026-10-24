@@ -28,11 +28,12 @@
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'pending'" link type="success" @click="handleStart(row)">开始测试</el-button>
             <el-button v-if="row.status === 'active'" link type="warning" @click="handleEnd(row)">结束测试</el-button>
             <el-button link type="primary" @click="showResults(row)">查看成绩</el-button>
+            <el-button link type="primary" :loading="exportingId === row.id" @click="handleExport(row)">导出成绩</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -64,6 +65,9 @@
         <el-tag>{{ sessionDetail.class_name }}</el-tag>
         <span>提交 {{ sessionDetail.submitted_count }} / {{ sessionDetail.participant_count }} 人</span>
         <el-tag :type="statusType(sessionDetail.status)">{{ statusLabel(sessionDetail.status) }}</el-tag>
+        <el-button size="small" :loading="exportingId === currentSession?.id" @click="handleExport(currentSession)">
+          <el-icon><Download /></el-icon> 导出 Excel
+        </el-button>
       </div>
       <el-table :data="sessionDetail?.records || []" stripe max-height="420" v-loading="detailLoading">
         <el-table-column type="index" label="#" width="50" />
@@ -95,7 +99,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { typingApi } from '@/api'
+import { exportApi, typingApi } from '@/api'
 import ClassFilter from '@/components/ClassFilter.vue'
 import { formatDateTime } from '@/utils/datetime'
 
@@ -108,6 +112,7 @@ const showCreate = ref(false)
 const resultVisible = ref(false)
 const currentSession = ref(null)
 const sessionDetail = ref(null)
+const exportingId = ref(null)
 const createRef = ref()
 const createForm = ref({ class_name: '', text_id: null, title: '' })
 
@@ -170,6 +175,19 @@ async function handleEnd(row) {
   await loadSessions()
 }
 
+async function handleExport(row) {
+  if (!row) return
+  exportingId.value = row.id
+  try {
+    await exportApi.typingSession(row.id, row.title)
+    ElMessage.success('成绩已导出')
+  } catch (error) {
+    ElMessage.error(error?.message || '导出失败')
+  } finally {
+    exportingId.value = null
+  }
+}
+
 async function showResults(row) {
   currentSession.value = row
   resultVisible.value = true
@@ -201,5 +219,9 @@ onMounted(async () => {
   margin-bottom: 16px;
   font-size: 14px;
   color: #374151;
+}
+
+.result-summary .el-button {
+  margin-left: auto;
 }
 </style>
