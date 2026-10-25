@@ -159,7 +159,11 @@ export const typingApi = {
 export const exportApi = {
   students: (className) => downloadExport('students', { class_name: className }, `学生名单_${className || '全部'}.xlsx`),
   examResults: (examId, className, title) => downloadExport(`exams/${examId}/results`, { class_name: className }, `考试成绩_${title || examId}.xlsx`),
-  typingRecords: (className) => downloadExport('typing/records', { class_name: className }, `打字记录_${className || '全部'}.xlsx`),
+  typingRecords: (className) => downloadExport('typing/records', { class_name: className }, `打字成绩_${className || '全部'}.xlsx`),
+  typingSession: (sessionId, title) => {
+    const safe = String(title || '课堂测试').replace(/[\\/:*?"<>|]/g, '').trim() || '课堂测试'
+    return downloadExport(`typing/sessions/${sessionId}`, {}, `课堂打字成绩_${safe}.xlsx`)
+  },
 }
 
 export default api

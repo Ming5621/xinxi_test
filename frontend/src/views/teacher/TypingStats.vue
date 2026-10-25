@@ -41,7 +41,7 @@
         <ClassFilter v-model="classFilter" @update:model-value="loadStats" />
         <div class="toolbar-right">
           <el-button @click="$router.push('/teacher/typing/class-test')">课堂打字测试</el-button>
-          <el-button @click="handleExport"><el-icon><Download /></el-icon> 导出 Excel</el-button>
+          <el-button @click="handleExport"><el-icon><Download /></el-icon> 导出成绩</el-button>
         </div>
       </div>
 
