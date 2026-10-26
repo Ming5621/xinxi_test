@@ -60,14 +60,21 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.9
-          name: 微机教室考试系统 v1.2.9
+          tag_name: v1.2.10
+          name: 微机教室考试系统 v1.2.10
           body: |
             ## 下载说明
 
             解压 **ExamSystem.zip** 到 Windows 教师机，双击 **ExamSystem.exe** 即可启动。
 
             程序会自动选择空闲端口（优先 **18765**），放行防火墙，并自动打开浏览器。
+
+            若手里的程序仍停在「已等待 0s / 75s」，请改用本压缩包，旧 exe 无法从这个画面继续。
+
+            ### v1.2.10
+            - 修复双击 exe 后启动窗口停在「已等待 0s / 75s」
+            - 启动倒计时改由主线程刷新，服务就绪后会自动打开浏览器
+            - 健康检查直连本机，不受系统代理影响
 
             ### v1.2.9
             - 课堂 5 分钟打字测试可导出全班成绩（含未提交）

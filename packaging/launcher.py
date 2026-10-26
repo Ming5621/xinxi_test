@@ -18,13 +18,13 @@ from __future__ import annotations
 
 import atexit
 import os
+import queue
 import socket
 import subprocess
 import sys
 import threading
 import time
 import traceback
-import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -98,17 +98,72 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
+APP_VERSION = "1.2.10"
+
+_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+
+
 def health_url(port: int) -> str:
     return f"http://127.0.0.1:{port}/api/health"
 
 
+def sanitized_child_env(base: dict | None = None) -> dict:
+    """子进程不继承系统代理。教室电脑的代理会让本机健康检查和启动一直挂起。"""
+    env = dict(os.environ if base is None else base)
+    for key in _PROXY_ENV_KEYS:
+        env.pop(key, None)
+    env["NO_PROXY"] = "*"
+    env["no_proxy"] = "*"
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
 def check_health(port: int, timeout: float = 0.25) -> bool:
+    """直连 127.0.0.1，不走系统代理。超时由套接字强制切断，避免界面一直停在 0 秒。"""
+    sock = None
     try:
-        with urllib.request.urlopen(health_url(port), timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="ignore")
-            return 200 <= resp.status < 300 and "ok" in body.lower()
+        sock = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
+        deadline = time.monotonic() + timeout
+        sock.settimeout(timeout)
+        request = (
+            f"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+            "Connection: close\r\n\r\n"
+        )
+        sock.sendall(request.encode("ascii"))
+        chunks = []
+        total = 0
+        while total < 8192 and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            sock.settimeout(remaining)
+            try:
+                piece = sock.recv(1024)
+            except socket.timeout:
+                break
+            if not piece:
+                break
+            chunks.append(piece)
+            total += len(piece)
+        text = b"".join(chunks).decode("utf-8", errors="ignore")
+        head, _, body = text.partition("\r\n\r\n")
+        status_line = head.split("\r\n", 1)[0]
+        return status_line.startswith("HTTP/") and " 200 " in status_line and "ok" in body.lower()
     except Exception:
         return False
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def wait_for_health(
@@ -128,12 +183,16 @@ def wait_for_health(
             write_log(f"health ok after {time.time() - started:.2f}s")
             return True
         elapsed = int(time.time() - started)
-        if on_tick is not None and elapsed != last_tick:
+        if elapsed != last_tick:
             last_tick = elapsed
-            try:
-                on_tick(elapsed, int(timeout))
-            except Exception:
-                pass
+            if elapsed == 0 or elapsed % 5 == 0:
+                alive = None if proc is None else proc.poll() is None
+                write_log(f"health wait {elapsed}s/{int(timeout)}s port={port} proc_alive={alive}")
+            if on_tick is not None:
+                try:
+                    on_tick(elapsed, int(timeout))
+                except Exception:
+                    pass
         time.sleep(0.2)
     return False
 
@@ -303,12 +362,15 @@ def start_server_process(port: int) -> subprocess.Popen:
     stdout.write(f"\n===== serve port={port} at {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
     stdout.flush()
 
+    env = sanitized_child_env()
+
     popen_kwargs = {
         "args": cmd,
+        "stdin": subprocess.DEVNULL,
         "stdout": stdout,
         "stderr": subprocess.STDOUT,
         "cwd": str(get_install_dir()),
-        "env": os.environ.copy(),
+        "env": env,
     }
     if sys.platform == "win32":
         popen_kwargs["creationflags"] = CREATE_NO_WINDOW
@@ -367,6 +429,12 @@ class LauncherApp:
         self._center_window()
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._ui_queue: queue.Queue = queue.Queue()
+        self._wait_gen = 0
+        self._error_shown = False
+        self._ui_running = True
+        self._pump_after_id = None
+        self._wait_after_id = None
 
     def _center_window(self):
         self.root.update_idletasks()
@@ -452,14 +520,44 @@ class LauncherApp:
 
         tk.Label(
             self.root,
-            text="版权所有 © 柴延明 · 保留所有权利",
+            text=f"版权所有 © 柴延明 · 保留所有权利 · v{APP_VERSION}",
             font=("Microsoft YaHei UI", 9),
             fg=self.MUTED,
             bg=self.BG,
         ).pack(pady=(0, 16))
 
-    def set_status(self, text: str, running: bool = False):
+    def post_ui(self, fn) -> None:
+        """后台线程只入队，由主线程刷新界面。直接 root.after 在 Windows 上会卡死 Tk。"""
+        self._ui_queue.put(fn)
+
+    def _pump_ui(self) -> None:
+        try:
+            while True:
+                fn = self._ui_queue.get_nowait()
+                try:
+                    fn()
+                except Exception:
+                    write_log(f"ui callback failed\n{traceback.format_exc()}")
+        except queue.Empty:
+            pass
+        if not self._ui_running:
+            return
+        try:
+            if self.root.winfo_exists():
+                self._pump_after_id = self.root.after(100, self._pump_ui)
+        except Exception:
+            pass
+
+    def set_status(self, text: str, running: bool = False, progress: float | None = None):
         self.status_var.set(text)
+        if progress is not None:
+            try:
+                if str(self.progress["mode"]) != "determinate":
+                    self.progress.stop()
+                    self.progress.configure(mode="determinate", maximum=100)
+                self.progress["value"] = max(0.0, min(100.0, float(progress)))
+            except Exception:
+                pass
         if running:
             try:
                 self.progress.stop()
@@ -467,6 +565,54 @@ class LauncherApp:
             except Exception:
                 pass
             self.open_btn.config(state="normal")
+
+    def _arm_wait_progress(self, port: int, total: int) -> None:
+        """倒计时只在主线程刷新。后台线程直接调用 Tk 会在 Windows 上把窗口卡在 0 秒。"""
+        self._wait_gen += 1
+        gen = self._wait_gen
+        started = time.time()
+
+        def tick():
+            if gen != self._wait_gen or self._error_shown:
+                return
+            elapsed = int(time.time() - started)
+            if elapsed > total:
+                self._show_error(
+                    f"端口 {port} 服务启动超时（超过 {total} 秒）。\n\n"
+                    f"请查看日志：\n{get_log_path()}\n{get_data_dir() / 'server.log'}"
+                )
+                return
+            self.set_status(
+                f"正在启动服务（端口 {port}）… 已等待 {elapsed}s / {total}s",
+                progress=min(95.0, elapsed * 100 / max(total, 1)),
+            )
+            try:
+                self._wait_after_id = self.root.after(200, tick)
+            except Exception:
+                pass
+
+        tick()
+
+    def _cancel_wait_progress(self) -> None:
+        self._wait_gen += 1
+        after_id = self._wait_after_id
+        self._wait_after_id = None
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+
+    def _stop_ui_timers(self) -> None:
+        self._ui_running = False
+        self._cancel_wait_progress()
+        pump_id = self._pump_after_id
+        self._pump_after_id = None
+        if pump_id is not None:
+            try:
+                self.root.after_cancel(pump_id)
+            except Exception:
+                pass
 
     def refresh_urls(self):
         self.local_url = f"http://127.0.0.1:{self.port}"
@@ -480,11 +626,13 @@ class LauncherApp:
 
     def _on_close(self):
         if messagebox.askokcancel("退出", "关闭窗口将停止考试系统服务，确定退出吗？"):
+            self._stop_ui_timers()
             stop_server_process()
             self.root.destroy()
             os._exit(0)
 
     def _mark_ready(self, reused: bool = False):
+        self._cancel_wait_progress()
         self.refresh_urls()
         msg = (
             f"服务已在运行（端口 {self.port}）"
@@ -502,14 +650,14 @@ class LauncherApp:
             env_port = os.environ.get("EXAM_PORT")
             preferred = int(env_port) if env_port else None
 
-            self.root.after(0, lambda: self.set_status("正在检测空闲端口..."))
+            self.post_ui(lambda: self.set_status("正在检测空闲端口..."))
             self.local_ip = get_local_ip()
             self.port = choose_port(preferred)
-            self.root.after(0, self.refresh_urls)
+            self.post_ui(self.refresh_urls)
             write_log(f"chosen port={self.port} ip={self.local_ip}")
 
             if check_health(self.port, timeout=0.35):
-                self.root.after(0, lambda: self._mark_ready(reused=True))
+                self.post_ui(lambda: self._mark_ready(reused=True))
                 return
 
             # 仅确保数据目录存在；数据库初始化在服务子进程中完成，避免重复耗时
@@ -517,19 +665,13 @@ class LauncherApp:
             setup_environment()
 
             # 先拉起服务进程，防火墙放行并行进行，避免 netsh 阻塞服务启动
-            self.root.after(0, lambda: self.set_status(f"正在启动服务（端口 {self.port}）..."))
-            proc = start_server_process(self.port)
-            threading.Thread(target=open_firewall_port, args=(self.port,), daemon=True).start()
+            port = self.port
+            proc = start_server_process(port)
+            threading.Thread(target=open_firewall_port, args=(port,), daemon=True).start()
+            # 进度条由主线程自己走，后台线程只负责拉起进程和健康检查
+            self.post_ui(lambda p=port: self._arm_wait_progress(p, 75))
 
-            def on_tick(elapsed: int, total: int):
-                self.root.after(
-                    0,
-                    lambda: self.set_status(
-                        f"正在启动服务（端口 {self.port}）… 已等待 {elapsed}s / {total}s"
-                    ),
-                )
-
-            if not wait_for_health(self.port, timeout=75.0, proc=proc, on_tick=on_tick):
+            if not wait_for_health(self.port, timeout=75.0, proc=proc):
                 # 读一点服务日志便于提示
                 server_log = get_data_dir() / "server.log"
                 tail = ""
@@ -545,12 +687,17 @@ class LauncherApp:
                 )
 
             write_log(f"health ok port={self.port} bootstrap={time.time() - t_boot:.2f}s")
-            self.root.after(0, lambda: self._mark_ready(reused=False))
+            self.post_ui(lambda: self._mark_ready(reused=False))
         except Exception as e:
             write_log(f"bootstrap failed: {e}\n{traceback.format_exc()}")
-            self.root.after(0, lambda: self._show_error(str(e)))
+            message = str(e)
+            self.post_ui(lambda m=message: self._show_error(m))
 
     def _show_error(self, msg: str):
+        if self._error_shown:
+            return
+        self._error_shown = True
+        self._stop_ui_timers()
         try:
             self.progress.stop()
         except Exception:
@@ -561,6 +708,7 @@ class LauncherApp:
         sys.exit(1)
 
     def run(self):
+        self._pump_ui()
         self.root.after(120, lambda: threading.Thread(target=self._bootstrap, daemon=True).start())
         self.root.mainloop()
 
