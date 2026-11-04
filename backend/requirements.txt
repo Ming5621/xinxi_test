@@ -8,3 +8,5 @@ python-multipart==0.0.20
 pydantic==2.10.4
 pydantic-settings==2.7.0
 openpyxl==3.1.5
+# 精简版 Windows 没有系统 IANA 时区库，ZoneInfo("Asia/Shanghai") 依赖此包
+tzdata==2026.6

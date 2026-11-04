@@ -5,6 +5,7 @@ import sys
 
 tests = [
     ("启动器健康检查", ["python3", "tests/test_launcher_health.py"]),
+    ("时区", ["python3", "tests/test_timeutil.py"]),
     ("单元测试", ["python3", "tests/test_typing_utils.py"]),
     ("API 集成测试", ["python3", "tests/test_api.py"]),
     ("边界情况测试", ["python3", "tests/test_edge_cases.py"]),
