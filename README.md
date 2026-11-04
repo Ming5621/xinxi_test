@@ -14,6 +14,7 @@
 - 本机/学生机地址以启动器窗口显示为准（例如 `http://127.0.0.1:18765`）
 - 启动窗口底部带版本号。等待秒数会从 0 继续增加，服务就绪后自动打开浏览器
 - 若仍失败，请查看 `%APPDATA%\微机教室考试系统\launcher.log` 与 `server.log`
+- 若 `server.log` 里出现 `No time zone found with key Asia/Shanghai`，请下载 **v1.2.11** 及以上
 
 ## 功能特性
 

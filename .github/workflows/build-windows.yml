@@ -60,8 +60,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.10
-          name: 微机教室考试系统 v1.2.10
+          tag_name: v1.2.11
+          name: 微机教室考试系统 v1.2.11
           body: |
             ## 下载说明
 
@@ -69,7 +69,13 @@ jobs:
 
             程序会自动选择空闲端口（优先 **18765**），放行防火墙，并自动打开浏览器。
 
-            若手里的程序仍停在「已等待 0s / 75s」，请改用本压缩包，旧 exe 无法从这个画面继续。
+            若启动失败，日志里有 `No time zone found with key Asia/Shanghai`，请改用本压缩包。旧版在精简版 Windows 上会因为没有时区数据直接退出。
+
+            若手里的程序仍停在「已等待 0s / 75s」，同样请改用本压缩包，旧 exe 无法从这个画面继续。
+
+            ### v1.2.11
+            - 修复精简版 Windows 上服务起不来：日志反复出现 `No time zone found with key Asia/Shanghai`
+            - 安装包自带 tzdata 时区数据；数据仍然缺失时按 UTC+8 显示，最近活跃、心跳和导出时间不受影响
 
             ### v1.2.10
             - 修复双击 exe 后启动窗口停在「已等待 0s / 75s」

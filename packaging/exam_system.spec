@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 ROOT = Path(SPECPATH).parent
 BACKEND = ROOT / "backend"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
@@ -87,7 +89,19 @@ hiddenimports = [
     "tkinter",
     "tkinter.ttk",
     "tkinter.messagebox",
+    "zoneinfo",
+    "app.timeutil",
 ]
+
+# Windows 没有系统 IANA 时区库。zoneinfo 运行时用 importlib.resources 按字符串
+# 读取 tzdata 里的数据文件，PyInstaller 跟踪不到这些隐式导入，必须显式收集。
+tzdata_datas = collect_data_files("tzdata")
+if not any(src.replace("\\", "/").endswith("Asia/Shanghai") for src, _dest in tzdata_datas):
+    raise SystemExit(
+        "未找到 tzdata 的 Asia/Shanghai 数据文件。请先安装 backend/requirements.txt 再打包。"
+    )
+datas += tzdata_datas
+hiddenimports += collect_submodules("tzdata")
 
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
