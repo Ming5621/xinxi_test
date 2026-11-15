@@ -83,18 +83,20 @@ def compare_text(reference: str, typed: str) -> dict:
             errors += 1
             details.append({"index": i, "char": typed_char, "status": "extra"})
 
-    typed_len = len(typed) if typed else 1
-    ref_len = len(reference) if reference else 1
-    accuracy = round(correct / ref_len * 100, 1) if ref_len else 0
-    accuracy_by_typed = round(correct / typed_len * 100, 1) if typed_len else 0
+    typed_len = len(typed)
+    ref_len = len(reference)
+    # 正确率按已经打的字数统计，未打到的后半段不算错。
+    accuracy = round(correct / typed_len * 100, 1) if typed_len else 0.0
+    accuracy_by_ref = round(correct / ref_len * 100, 1) if ref_len else 0.0
 
     return {
         "correct_chars": correct,
         "error_chars": errors,
         "total_chars": ref_len,
-        "typed_chars": len(typed),
+        "typed_chars": typed_len,
         "accuracy": accuracy,
-        "accuracy_by_typed": accuracy_by_typed,
+        "accuracy_by_typed": accuracy,
+        "accuracy_by_ref": accuracy_by_ref,
         "details": details[:50],
     }
 

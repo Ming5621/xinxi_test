@@ -140,8 +140,7 @@ function calcStats(typed, reference, seconds) {
       correct += 1
     }
   }
-  const refLen = ref.length || 1
-  const acc = Math.round((correct / refLen) * 1000) / 10
+  const acc = input.length ? Math.round((correct / input.length) * 1000) / 10 : 0
   const mins = seconds > 1 ? seconds / 60 : 0
   const wpm = mins > 0 ? Math.round((correct / mins) * 10) / 10 : 0
   return { correct, accuracy: acc, wpm }

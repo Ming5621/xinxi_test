@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 from ..auth import get_password_hash, require_teacher
 from ..database import get_db
 from ..models import User, UserRole
-from ..permissions import active_student_name_taken, apply_student_scope, ensure_class_access, filter_class_name
+from ..permissions import (
+    active_student_name_taken,
+    apply_student_scope,
+    claim_class_for_teacher,
+    ensure_class_access,
+    filter_class_name,
+    student_in_scope,
+)
 from ..schemas import UserCreate, UserOut, UserUpdate
 from .auth import DEFAULT_STUDENT_CLASS
 
@@ -21,7 +28,8 @@ def _ensure_manage_user(current_user: User, target: User) -> None:
         return
     if target.role != UserRole.student:
         raise HTTPException(status_code=403, detail="仅管理员可管理教师账号")
-    ensure_class_access(current_user, target.class_name)
+    if not student_in_scope(current_user, target):
+        raise HTTPException(status_code=403, detail="无权管理该学生")
 
 
 def _clean_username(username: str) -> str:
@@ -135,9 +143,14 @@ def create_user(
     name = _clean_name(data.name, for_student=data.role == UserRole.student)
     password = _resolve_password(data.password, required=data.role != UserRole.student)
 
+    managed_by_teacher_id = None
     if data.role == UserRole.student:
         class_name = (data.class_name or "").strip() or DEFAULT_STUDENT_CLASS
-        ensure_class_access(current_user, class_name)
+        if current_user.role == UserRole.teacher:
+            class_name = claim_class_for_teacher(db, current_user, class_name)
+            managed_by_teacher_id = current_user.id
+        else:
+            ensure_class_access(current_user, class_name)
         _ensure_student_identity(db, name, class_name)
         assigned_classes: list[str] = []
     else:
@@ -151,6 +164,7 @@ def create_user(
         role=data.role,
         class_name=class_name,
         assigned_classes=assigned_classes,
+        managed_by_teacher_id=managed_by_teacher_id,
         is_active=True,
     )
     db.add(user)
@@ -201,8 +215,13 @@ def update_user(
         if data.class_name is not None or original_role != UserRole.student:
             raw_class = data.class_name if data.class_name is not None else user.class_name
             class_name = (raw_class or "").strip() or DEFAULT_STUDENT_CLASS
-            ensure_class_access(current_user, class_name)
+            if current_user.role == UserRole.teacher:
+                class_name = claim_class_for_teacher(db, current_user, class_name)
+            else:
+                ensure_class_access(current_user, class_name)
             user.class_name = class_name
+        if current_user.role == UserRole.teacher and user.managed_by_teacher_id is None:
+            user.managed_by_teacher_id = current_user.id
         user.assigned_classes = []
     elif new_role == UserRole.teacher:
         if current_user.role == UserRole.admin and (

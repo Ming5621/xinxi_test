@@ -15,7 +15,7 @@ from ..models import (
     SessionStatus,
     User,
 )
-from ..permissions import ensure_class_access, filter_class_name, get_assigned_classes
+from ..permissions import filter_class_name, student_in_scope
 from ..import_utils import normalize_answer
 from ..typing_utils import compare_text, calculate_wpm, parse_typing_config, score_typing_question, get_typing_level
 from ..schemas import (
@@ -494,8 +494,8 @@ def get_session_detail(
     student = session.student
     if student is None:
         raise HTTPException(status_code=404, detail="学生账号不存在")
-    if current_user.role.value == "teacher":
-        ensure_class_access(current_user, student.class_name)
+    if current_user.role.value == "teacher" and not student_in_scope(current_user, student):
+        raise HTTPException(status_code=403, detail="无权查看该学生成绩")
 
     exam = session.exam
     answers_out = []
@@ -555,13 +555,10 @@ def list_exam_sessions(
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
     sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
-    classes = get_assigned_classes(current_user)
     result = []
     for s in sessions:
         student = s.student
-        if not student:
-            continue
-        if classes is not None and student.class_name not in classes:
+        if not student or not student_in_scope(current_user, student):
             continue
         if class_name and student.class_name != class_name:
             continue

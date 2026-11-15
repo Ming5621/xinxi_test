@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+import json
+
+from fastapi import APIRouter, Body, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth import get_password_hash, require_teacher
 from ..database import get_db
 from ..import_utils import parse_questions_text, parse_students_text
 from ..models import QuestionType, User, UserRole
-from ..permissions import active_student_name_taken, ensure_class_access
+from ..permissions import active_student_name_taken, claim_class_for_teacher
 from ..schemas import BatchImportRequest, BatchImportResult, QuestionCreate, QuestionParseResult
+from ..sync_pack import import_teacher_pack
 
 router = APIRouter(prefix="/api/import", tags=["批量导入"])
 
@@ -29,13 +32,11 @@ def batch_import_students(
         if existing:
             errors.append(f"用户名 {item['username']} 已存在，已跳过")
             continue
-        class_name = item.get("class_name", "")
-        if class_name:
-            try:
-                ensure_class_access(current_user, class_name)
-            except HTTPException:
-                errors.append(f"用户名 {item['username']} 班级 {class_name} 无权限，已跳过")
-                continue
+        class_name = (item.get("class_name") or "").strip()
+        if current_user.role == UserRole.teacher:
+            class_name = claim_class_for_teacher(db, current_user, class_name)
+        elif not class_name:
+            class_name = "课堂"
         if active_student_name_taken(db, item["name"], class_name):
             label = class_name or "（未分班）"
             errors.append(f"班级 {label} 已有同名学生 {item['name']}，已跳过")
@@ -45,7 +46,8 @@ def batch_import_students(
             password_hash=get_password_hash(item["password"]),
             name=item["name"],
             role=UserRole.student,
-            class_name=item.get("class_name", ""),
+            class_name=class_name,
+            managed_by_teacher_id=current_user.id if current_user.role == UserRole.teacher else None,
         )
         db.add(user)
         success += 1
@@ -124,3 +126,28 @@ async def parse_questions_file(
         BatchImportRequest(text=text, default_score=default_score),
         _=_,
     )
+
+
+@router.post("/teacher-pack")
+def import_teacher_data(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    return import_teacher_pack(db, current_user, payload)
+
+
+@router.post("/teacher-pack/file")
+async def import_teacher_data_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    raw = await file.read()
+    try:
+        payload = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="无法解析教师数据包，请使用 UTF-8 JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="教师数据包格式不正确")
+    return import_teacher_pack(db, current_user, payload)

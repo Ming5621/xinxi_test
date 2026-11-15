@@ -7,15 +7,15 @@
 
     <div class="content-card" v-loading="loading">
       <el-table :data="sessions" stripe style="width: 100%">
-        <el-table-column prop="exam_title" label="考试名称" min-width="200" />
-        <el-table-column label="状态" width="100">
+        <el-table-column prop="exam_title" label="考试名称" min-width="200" sortable />
+        <el-table-column label="状态" width="100" sortable :sort-method="(a, b) => String(a.status || '').localeCompare(String(b.status || ''))">
           <template #default="{ row }">
             <el-tag :type="row.status === 'submitted' ? 'success' : 'warning'" size="small">
               {{ row.status === 'submitted' ? '已提交' : '答题中' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="得分" width="140">
+        <el-table-column label="得分" width="140" sortable :sort-method="(a, b) => (a.total_score || 0) - (b.total_score || 0)">
           <template #default="{ row }">
             <span v-if="row.status === 'submitted'" class="score-text">
               {{ row.total_score }} / {{ row.max_score }}
@@ -23,14 +23,14 @@
             <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="是否及格" width="100">
+        <el-table-column label="是否及格" width="100" sortable :sort-method="(a, b) => Number(!!a.is_passed) - Number(!!b.is_passed)">
           <template #default="{ row }">
             <el-tag v-if="row.status === 'submitted'" :type="row.is_passed ? 'success' : 'danger'" size="small">
               {{ row.is_passed ? '及格' : '不及格' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="提交时间" width="180">
+        <el-table-column prop="submit_time" label="提交时间" width="180" sortable>
           <template #default="{ row }">
             {{ row.submit_time ? formatDate(row.submit_time) : '—' }}
           </template>

@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     JSON,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -64,11 +65,26 @@ class User(Base):
     role = Column(Enum(UserRole), nullable=False, default=UserRole.student)
     class_name = Column(String(100), default="")
     assigned_classes = Column(JSON, default=list)
+    managed_by_teacher_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen_at = Column(DateTime, nullable=True)
 
     exam_sessions = relationship("ExamSession", back_populates="student")
+
+
+class SchoolClass(Base):
+    """教师自建班级。同一教师下班级名唯一，不同教师可以有同名班级。"""
+
+    __tablename__ = "school_classes"
+    __table_args__ = (UniqueConstraint("teacher_id", "name", name="uq_teacher_class_name"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    teacher = relationship("User", foreign_keys=[teacher_id])
 
 
 class Exam(Base):

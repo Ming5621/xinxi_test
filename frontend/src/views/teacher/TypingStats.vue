@@ -46,26 +46,26 @@
       </div>
 
       <el-table :data="stats" stripe>
-        <el-table-column prop="student_name" label="姓名" width="100" />
-        <el-table-column prop="class_name" label="班级" width="120" />
-        <el-table-column prop="practice_count" label="练习次数" width="100" />
-        <el-table-column label="平均评分" width="100">
+        <el-table-column prop="student_name" label="姓名" width="100" sortable />
+        <el-table-column prop="class_name" label="班级" width="120" sortable />
+        <el-table-column prop="practice_count" label="练习次数" width="100" sortable />
+        <el-table-column prop="avg_score" label="平均评分" width="100" sortable>
           <template #default="{ row }">
             <strong>{{ row.avg_score || '—' }}</strong>
           </template>
         </el-table-column>
-        <el-table-column label="平均速度" width="120">
+        <el-table-column prop="avg_wpm" label="平均速度" width="120" sortable>
           <template #default="{ row }">
             <span :style="{ color: speedColor(row.avg_wpm), fontWeight: 600 }">{{ row.avg_wpm }} 字/分</span>
           </template>
         </el-table-column>
-        <el-table-column prop="best_wpm" label="最佳速度" width="120">
+        <el-table-column prop="best_wpm" label="最佳速度" width="120" sortable>
           <template #default="{ row }">{{ row.best_wpm }} 字/分</template>
         </el-table-column>
-        <el-table-column prop="avg_accuracy" label="平均准确率" width="120">
+        <el-table-column prop="avg_accuracy" label="平均准确率" width="120" sortable>
           <template #default="{ row }">{{ row.avg_accuracy }}%</template>
         </el-table-column>
-        <el-table-column label="最近等级" width="100">
+        <el-table-column prop="latest_level" label="最近等级" width="100" sortable>
           <template #default="{ row }">
             <el-tag v-if="row.latest_level !== '—'" size="small" effect="dark"
               :color="levelColor(row.latest_level)">{{ row.latest_level }}</el-tag>
@@ -91,30 +91,30 @@
           </div>
         </el-col>
       </el-row>
-      <p class="std-note">准确率 ≥ 95% 方可获得良好 / 优秀 / 卓越 · 综合评分满分 100 分</p>
+      <p class="std-note">准确率按已经打的字数计算，未打完的后半段不算错 · 准确率 ≥ 95% 方可获得良好 / 优秀 / 卓越 · 综合评分满分 100 分</p>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="`${currentStudent?.student_name || ''} 的打字记录`" width="760px">
       <el-table :data="records" stripe v-loading="recordsLoading" max-height="420">
-        <el-table-column prop="text_title" label="文章" min-width="140" />
-        <el-table-column label="模式" width="100">
+        <el-table-column prop="text_title" label="文章" min-width="140" sortable />
+        <el-table-column prop="source" label="模式" width="100" sortable>
           <template #default="{ row }">{{ row.source === 'test' ? '5分钟测试' : '自由练习' }}</template>
         </el-table-column>
-        <el-table-column label="评分" width="80">
+        <el-table-column prop="score" label="评分" width="80" sortable>
           <template #default="{ row }"><strong>{{ row.score }}</strong></template>
         </el-table-column>
-        <el-table-column label="速度" width="100">
+        <el-table-column prop="wpm" label="速度" width="100" sortable>
           <template #default="{ row }">{{ row.wpm }} 字/分</template>
         </el-table-column>
-        <el-table-column label="准确率" width="90">
+        <el-table-column prop="accuracy" label="准确率" width="90" sortable>
           <template #default="{ row }">{{ row.accuracy }}%</template>
         </el-table-column>
-        <el-table-column label="等级" width="90">
+        <el-table-column prop="level" label="等级" width="90" sortable>
           <template #default="{ row }">
             <el-tag size="small" :color="levelColor(row.level)" effect="dark">{{ row.level }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="时间" width="170">
+        <el-table-column prop="created_at" label="时间" width="170" sortable>
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
       </el-table>

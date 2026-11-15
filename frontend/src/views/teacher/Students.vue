@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>学生动态</h1>
-      <p>学生输入姓名登录后自动出现；可查看在线状态并发任务测试</p>
+      <p>可新建班级、批量导入学生；导入的学生只对本教师可见。换教室时导出教师数据再导入即可同步。</p>
     </div>
 
     <div class="content-card">
@@ -16,6 +16,10 @@
             <span class="online-dot"></span>
             在线 {{ onlineCount }} / {{ students.length }}
           </span>
+          <el-button @click="showCreateClass">新建班级</el-button>
+          <el-button @click="handleExportPack">导出教师数据</el-button>
+          <el-button @click="packFileRef?.click()">导入教师数据</el-button>
+          <input ref="packFileRef" type="file" accept=".json,application/json" class="hidden-file" @change="handleImportPack" />
           <el-button @click="handleExport">
             <el-icon><Download /></el-icon> 导出 Excel
           </el-button>
@@ -29,9 +33,9 @@
       </div>
 
       <el-table :data="filteredStudents" stripe v-loading="loading">
-        <el-table-column prop="username" label="用户名" width="140" />
-        <el-table-column prop="name" label="姓名" width="120" />
-        <el-table-column prop="class_name" label="班级" width="140" />
+        <el-table-column prop="username" label="用户名" width="140" sortable />
+        <el-table-column prop="name" label="姓名" width="120" sortable />
+        <el-table-column prop="class_name" label="班级" width="140" sortable />
         <el-table-column label="在线" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_online ? 'success' : 'info'" size="small" effect="plain">
@@ -58,6 +62,18 @@
         </el-table-column>
       </el-table>
     </div>
+
+    <el-dialog v-model="classDialogVisible" title="新建班级" width="420px">
+      <el-form @submit.prevent="handleCreateClass">
+        <el-form-item label="班级名称">
+          <el-input v-model="newClassName" placeholder="例如：微机1班" maxlength="100" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="classDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingClass" @click="handleCreateClass">创建</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑学生' : '添加学生'" width="480px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
@@ -125,9 +141,13 @@ const availableClasses = ref([])
 const classFilter = ref('')
 const search = ref('')
 const dialogVisible = ref(false)
+const classDialogVisible = ref(false)
 const importVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
+const packFileRef = ref()
+const newClassName = ref('')
+const savingClass = ref(false)
 const form = ref({ username: '', name: '', class_name: '', password: '' })
 
 const rules = {
@@ -174,6 +194,7 @@ async function handleSave() {
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
+    await loadClasses()
     await loadStudents()
   } finally {
     saving.value = false
@@ -191,6 +212,53 @@ async function loadStudents() {
   students.value = await presenceApi.students(classFilter.value)
 }
 
+async function loadClasses() {
+  const res = await classApi.list()
+  availableClasses.value = res.classes || []
+  window.dispatchEvent(new Event('exam-classes-changed'))
+}
+
+function showCreateClass() {
+  newClassName.value = ''
+  classDialogVisible.value = true
+}
+
+async function handleCreateClass() {
+  const name = newClassName.value.trim()
+  if (!name) {
+    ElMessage.warning('请输入班级名称')
+    return
+  }
+  savingClass.value = true
+  try {
+    await classApi.create(name)
+    ElMessage.success(`已创建班级「${name}」`)
+    classDialogVisible.value = false
+    await loadClasses()
+  } finally {
+    savingClass.value = false
+  }
+}
+
+async function handleExportPack() {
+  await exportApi.teacherPack()
+  ElMessage.success('已导出教师数据，可在另一台教师机导入')
+}
+
+async function handleImportPack(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const result = await importApi.teacherPackFile(file)
+  await loadClasses()
+  await loadStudents()
+  const created = result?.student_created || 0
+  const updated = result?.student_updated || 0
+  const exams = result?.exam_count || 0
+  const texts = result?.text_count || 0
+  ElMessage.success(`导入完成：学生新增 ${created}、更新 ${updated}，考试 ${exams}，文章 ${texts}`)
+}
+
 async function handleExport() {
   await exportApi.students(classFilter.value)
   ElMessage.success('导出成功')
@@ -204,8 +272,7 @@ async function handleBatchImport({ text, file, defaultPassword }) {
 }
 
 onMounted(async () => {
-  const res = await classApi.list()
-  availableClasses.value = res.classes || []
+  await loadClasses()
   await loadStudents()
   loading.value = false
   refreshTimer = setInterval(loadStudents, 10000)
@@ -235,6 +302,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .online-summary {
@@ -258,5 +326,9 @@ onUnmounted(() => {
 .status-dot.online {
   background: #22c55e;
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+}
+
+.hidden-file {
+  display: none;
 }
 </style>

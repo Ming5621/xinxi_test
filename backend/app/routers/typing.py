@@ -17,10 +17,11 @@ from ..models import (
     UserRole,
 )
 from ..permissions import (
+    apply_student_scope,
     can_manage_typing_text,
     ensure_class_access,
     filter_class_name,
-    get_assigned_classes,
+    student_in_scope,
     teacher_ids_for_class,
 )
 from ..schemas import (
@@ -334,11 +335,8 @@ def list_sessions(
         .options(joinedload(TypingClassSession.teacher), joinedload(TypingClassSession.text))
         .order_by(TypingClassSession.id.desc())
     )
-    classes = get_assigned_classes(current_user)
-    if classes is not None:
-        if not classes:
-            return []
-        query = query.filter(TypingClassSession.class_name.in_(classes))
+    if current_user.role == UserRole.teacher:
+        query = query.filter(TypingClassSession.teacher_id == current_user.id)
     sessions = query.limit(50).all()
     return [_session_to_out(s, db) for s in sessions]
 
@@ -348,16 +346,17 @@ def active_session_for_student(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_student),
 ):
-    session = (
+    query = (
         db.query(TypingClassSession)
         .options(joinedload(TypingClassSession.teacher), joinedload(TypingClassSession.text))
         .filter(
             TypingClassSession.class_name == current_user.class_name,
             TypingClassSession.status == TypingClassSessionStatus.active,
         )
-        .order_by(TypingClassSession.id.desc())
-        .first()
     )
+    if current_user.managed_by_teacher_id:
+        query = query.filter(TypingClassSession.teacher_id == current_user.managed_by_teacher_id)
+    session = query.order_by(TypingClassSession.id.desc()).first()
     if not session:
         return None
     return _session_to_out(session, db)
@@ -380,6 +379,8 @@ def session_detail(
     if current_user.role == UserRole.student:
         if session.class_name != current_user.class_name:
             raise HTTPException(status_code=403, detail="无权查看")
+    elif current_user.role == UserRole.teacher and session.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权查看其他教师的课堂测试")
     else:
         ensure_class_access(current_user, session.class_name)
 
@@ -625,14 +626,12 @@ def list_records(
         student = db.query(User).filter(User.id == student_id).first()
         if not student:
             raise HTTPException(status_code=404, detail="学生不存在")
-        ensure_class_access(current_user, student.class_name)
+        if not student_in_scope(current_user, student):
+            raise HTTPException(status_code=403, detail="无权访问该学生数据")
         query = query.filter(TypingRecord.student_id == student_id)
-    elif class_name:
-        query = query.join(User).filter(User.class_name == class_name)
     else:
-        classes = get_assigned_classes(current_user)
-        if classes is not None:
-            query = query.join(User).filter(User.class_name.in_(classes))
+        visible_ids = [u.id for u in apply_student_scope(db.query(User), current_user, class_name).all()]
+        query = query.filter(TypingRecord.student_id.in_(visible_ids or [-1]))
     return [_record_to_out(r) for r in query.limit(limit).all()]
 
 
@@ -643,15 +642,7 @@ def class_stats(
     current_user: User = Depends(require_teacher),
 ):
     class_name = filter_class_name(current_user, class_name)
-    q = db.query(User).filter(User.role == UserRole.student, User.is_active == True)
-    classes = get_assigned_classes(current_user)
-    if classes is not None:
-        if class_name:
-            q = q.filter(User.class_name == class_name)
-        else:
-            q = q.filter(User.class_name.in_(classes))
-    elif class_name:
-        q = q.filter(User.class_name == class_name)
+    q = apply_student_scope(db.query(User), current_user, class_name).filter(User.is_active == True)
     students = q.order_by(User.class_name, User.id).all()
 
     stats = []

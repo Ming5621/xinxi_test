@@ -70,6 +70,7 @@ export const authApi = {
 
 export const classApi = {
   list: () => api.get('/classes'),
+  create: (name) => api.post('/classes', { name }),
 }
 
 export const userApi = {
@@ -93,6 +94,13 @@ export const importApi = {
     const form = new FormData()
     form.append('file', file)
     return api.post(`/import/questions/file?default_score=${defaultScore}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  teacherPackFile: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/import/teacher-pack/file', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
@@ -164,6 +172,7 @@ export const exportApi = {
     const safe = String(title || '课堂测试').replace(/[\\/:*?"<>|]/g, '').trim() || '课堂测试'
     return downloadExport(`typing/sessions/${sessionId}`, {}, `课堂打字成绩_${safe}.xlsx`)
   },
+  teacherPack: () => downloadExport('teacher-pack', {}, `教师数据.json`),
 }
 
 export default api

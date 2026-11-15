@@ -317,14 +317,24 @@ purge_test_accounts()
 code, classes = req("GET", "/classes", token=teacher_token)
 check("教师获取班级列表", code == 200 and "classes" in classes)
 
-code, _ = req("POST", "/users", {
+code, created_class_student = req("POST", "/users", {
     "username": "test_cross_class",
     "name": "跨班学生",
     "password": "123456",
     "role": "student",
     "class_name": "微机2班",
 }, token=teacher_token)
-check("教师无法创建其他班级学生", code == 403)
+check(
+    "教师可新建班级并导入学生",
+    code == 200 and created_class_student.get("class_name") == "微机2班",
+    str(created_class_student),
+)
+code, classes_after = req("GET", "/classes", token=teacher_token)
+check(
+    "新建班级出现在教师班级列表",
+    code == 200 and "微机2班" in (classes_after.get("classes") or []),
+    str(classes_after),
+)
 
 code, _ = req("GET", "/users?role=teacher", token=teacher_token)
 check("教师无法查看教师列表", code == 403)
@@ -527,19 +537,32 @@ if texts:
     check("提交打字练习", code == 200 and typing_result.get("wpm", 0) >= 0)
     check("打字练习返回评分", code == 200 and float(typing_result.get("score") or 0) > 0)
 
-code, low_acc = req("POST", "/typing/submit", {
+code, typed_acc = req("POST", "/typing/submit", {
     "reference_text": "测" * 200,
     "typed_text": "测" * 17,
     "duration_seconds": 10,
     "source": "practice",
 }, token=student_token)
 check(
-    "高速低准确率不得卓越",
+    "正确率按已打字数统计",
     code == 200
-    and abs(float(low_acc.get("accuracy", 0)) - 8.5) < 0.05
-    and float(low_acc.get("wpm", 0)) >= 40
-    and low_acc.get("level") not in ("良好", "优秀", "卓越")
-    and "卓越" not in (low_acc.get("remark") or ""),
+    and abs(float(typed_acc.get("accuracy", 0)) - 100) < 0.05
+    and float(typed_acc.get("wpm", 0)) >= 40
+    and typed_acc.get("level") == "卓越",
+    str(typed_acc),
+)
+
+code, low_acc = req("POST", "/typing/submit", {
+    "reference_text": "测" * 200,
+    "typed_text": "错" * 17,
+    "duration_seconds": 10,
+    "source": "practice",
+}, token=student_token)
+check(
+    "已打字全错不得卓越",
+    code == 200
+    and float(low_acc.get("accuracy", 100)) == 0
+    and low_acc.get("level") not in ("良好", "优秀", "卓越"),
     str(low_acc),
 )
 
@@ -547,9 +570,9 @@ code, records = req("GET", "/typing/records/my", token=student_token)
 latest_low = records[0] if code == 200 and records else {}
 check("查看打字记录", code == 200)
 check(
-    "历史记录低准确率不得卓越",
-    abs(float(latest_low.get("accuracy") or 0) - 8.5) < 0.05
-    and float(latest_low.get("wpm") or 0) >= 40
+    "历史记录按已打字数计正确率",
+    latest_low.get("accuracy") is not None
+    and abs(float(latest_low.get("accuracy")) - 0) < 0.05
     and latest_low.get("level") not in ("良好", "优秀", "卓越"),
     str(latest_low),
 )
@@ -663,13 +686,62 @@ check("学生无法查看在线状态", code == 403)
 code, _ = req("GET", "/exams")
 check("未登录拒绝", code == 401)
 
+teacher2_token, _ = login("teacher2", "teacher123")
+code, teacher2_students = req("GET", "/presence/students", token=teacher2_token)
+t2_names = {s.get("username") for s in teacher2_students} if code == 200 else set()
+check("其他教师看不到已绑定学生", code == 200 and "test_cross_class" not in t2_names, str(t2_names))
+
+code, pack = req("GET", "/export/teacher-pack", token=teacher_token)
+check(
+    "导出教师数据包",
+    code == 200 and pack.get("format") == "xinxi_teacher_pack" and "students" in pack,
+    str(pack)[:200] if isinstance(pack, dict) else str(pack),
+)
+
+code, imported = req("POST", "/import/teacher-pack", {
+    "format": "xinxi_teacher_pack",
+    "version": 1,
+    "classes": ["同步班"],
+    "students": [{"username": "pack_stu_01", "name": "同步生", "class_name": "同步班", "is_active": True}],
+    "typing_texts": [{"title": "同步练习文", "content": "信息技术改变生活。", "difficulty": "basic", "time_limit": 60}],
+    "exams": [{
+        "title": "同步测验包",
+        "description": "同步用",
+        "duration_minutes": 20,
+        "pass_score": 10,
+        "status": "draft",
+        "questions": [{
+            "type": "judge",
+            "content": "地球是圆的",
+            "options": ["正确", "错误"],
+            "correct_answer": "正确",
+            "score": 10,
+            "order_num": 0,
+        }],
+    }],
+}, token=teacher2_token)
+check(
+    "另一名教师导入数据包",
+    code == 200 and imported.get("student_created", 0) >= 1 and imported.get("exam_count", 0) >= 1,
+    str(imported),
+)
+code, t2_after = req("GET", "/presence/students", token=teacher2_token)
+t2_after_names = {s.get("username") for s in t2_after} if code == 200 else set()
+check("导入后学生绑定到导入教师", "pack_stu_01" in t2_after_names, str(t2_after_names))
+code, t1_after = req("GET", "/presence/students", token=teacher_token)
+t1_after_names = {s.get("username") for s in t1_after} if code == 200 else set()
+check("原教师看不到对方导入的学生", "pack_stu_01" not in t1_after_names, str(t1_after_names))
+
 # 清理测试用户
-for username in ["test_student_99", "test_import01", "test_import02", "test_cross_class"]:
-    code, users = req("GET", "/users?role=student", token=teacher_token)
+for token, names in (
+    (teacher_token, ["test_student_99", "test_import01", "test_import02", "test_cross_class"]),
+    (teacher2_token, ["pack_stu_01"]),
+):
+    code, users = req("GET", "/users?role=student", token=token)
     if code == 200:
         for u in users:
-            if u["username"] == username:
-                req("DELETE", f"/users/{u['id']}", token=teacher_token)
+            if u["username"] in names:
+                req("DELETE", f"/users/{u['id']}", token=token)
 
 print("=" * 50)
 print(f"结果: {passed} 通过, {failed} 失败")

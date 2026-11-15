@@ -64,12 +64,12 @@
       <div class="content-card" style="margin-top: 20px" v-if="stats.class_stats?.length">
         <h3 style="margin-bottom: 16px">各班级成绩分析</h3>
         <el-table :data="stats.class_stats" stripe>
-          <el-table-column prop="class_name" label="班级" width="140" />
-          <el-table-column prop="student_count" label="参考人数" width="100" />
-          <el-table-column prop="submitted_count" label="已提交" width="100" />
-          <el-table-column prop="average_score" label="平均分" width="100" />
-          <el-table-column prop="pass_count" label="及格人数" width="100" />
-          <el-table-column label="及格率" width="120">
+          <el-table-column prop="class_name" label="班级" width="140" sortable />
+          <el-table-column prop="student_count" label="参考人数" width="100" sortable />
+          <el-table-column prop="submitted_count" label="已提交" width="100" sortable />
+          <el-table-column prop="average_score" label="平均分" width="100" sortable />
+          <el-table-column prop="pass_count" label="及格人数" width="100" sortable />
+          <el-table-column prop="pass_rate" label="及格率" width="120" sortable>
             <template #default="{ row }">{{ row.pass_rate }}%</template>
           </el-table-column>
         </el-table>
@@ -79,18 +79,18 @@
         <h3 style="margin-bottom: 16px">各题正确率</h3>
         <el-table :data="stats.question_stats" stripe>
           <el-table-column type="index" label="#" width="50" />
-          <el-table-column prop="content" label="题目" min-width="300" />
-          <el-table-column label="类型" width="80">
+          <el-table-column prop="content" label="题目" min-width="300" sortable />
+          <el-table-column prop="type" label="类型" width="80" sortable>
             <template #default="{ row }">
               <el-tag :type="row.type === 'choice' ? '' : 'warning'" size="small">
-                {{ row.type === 'choice' ? '选择' : '判断' }}
+                {{ row.type === 'choice' ? '选择' : (row.type === 'typing' ? '打字' : '判断') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="正确/总数" width="120">
+          <el-table-column label="正确/总数" width="120" sortable :sort-method="(a, b) => (a.correct_count || 0) - (b.correct_count || 0)">
             <template #default="{ row }">{{ row.correct_count }} / {{ row.total_count }}</template>
           </el-table-column>
-          <el-table-column label="正确率" width="200">
+          <el-table-column prop="correct_rate" label="正确率" width="200" sortable>
             <template #default="{ row }">
               <el-progress
                 :percentage="row.correct_rate"
