@@ -13,9 +13,9 @@
 
     <div class="content-card" v-loading="loading">
       <el-table :data="sessions" stripe>
-        <el-table-column prop="student_name" label="姓名" width="120" />
-        <el-table-column prop="class_name" label="班级" width="120" />
-        <el-table-column label="状态" width="100">
+        <el-table-column prop="student_name" label="姓名" width="120" sortable />
+        <el-table-column prop="class_name" label="班级" width="120" sortable />
+        <el-table-column label="状态" width="100" sortable :sort-method="sortByStatus">
           <template #default="{ row }">
             <el-tag :type="row.status === 'submitted' ? 'success' : 'warning'" size="small">
               {{ row.status === 'submitted' ? '已提交' : '答题中' }}
@@ -28,17 +28,17 @@
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="及格" width="80">
+        <el-table-column label="及格" width="80" sortable :sort-method="sortByPassed">
           <template #default="{ row }">
             <el-tag v-if="row.status === 'submitted'" :type="row.is_passed ? 'success' : 'danger'" size="small">
               {{ row.is_passed ? '是' : '否' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="开始时间" width="180">
+        <el-table-column prop="start_time" label="开始时间" width="180" sortable>
           <template #default="{ row }">{{ formatDate(row.start_time) }}</template>
         </el-table-column>
-        <el-table-column label="提交时间" width="180">
+        <el-table-column prop="submit_time" label="提交时间" width="180" sortable>
           <template #default="{ row }">{{ row.submit_time ? formatDate(row.submit_time) : '—' }}</template>
         </el-table-column>
         <el-table-column label="操作" width="100" fixed="right">
@@ -99,6 +99,14 @@ function formatDate(d) {
 
 function sortByScore(a, b) {
   return (a.total_score || 0) - (b.total_score || 0)
+}
+
+function sortByStatus(a, b) {
+  return String(a.status || '').localeCompare(String(b.status || ''))
+}
+
+function sortByPassed(a, b) {
+  return Number(!!a.is_passed) - Number(!!b.is_passed)
 }
 
 async function showDetail(row) {

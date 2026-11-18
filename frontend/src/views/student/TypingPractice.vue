@@ -121,25 +121,25 @@
 
     <el-dialog v-model="historyVisible" title="我的打字记录" width="860px">
       <el-table :data="history" stripe size="small" v-loading="historyLoading" empty-text="暂无练习记录" max-height="420">
-        <el-table-column prop="text_title" label="文章" min-width="160" />
-        <el-table-column label="模式" width="100">
+        <el-table-column prop="text_title" label="文章" min-width="160" sortable />
+        <el-table-column prop="source" label="模式" width="100" sortable>
           <template #default="{ row }">{{ modeLabel(row.source) }}</template>
         </el-table-column>
-        <el-table-column label="评分" width="80">
+        <el-table-column prop="score" label="评分" width="80" sortable>
           <template #default="{ row }"><strong>{{ row.score }}</strong> 分</template>
         </el-table-column>
-        <el-table-column label="速度" width="100">
+        <el-table-column prop="wpm" label="速度" width="100" sortable>
           <template #default="{ row }">{{ row.wpm }} 字/分</template>
         </el-table-column>
-        <el-table-column label="准确率" width="90">
+        <el-table-column prop="accuracy" label="准确率" width="90" sortable>
           <template #default="{ row }">{{ row.accuracy }}%</template>
         </el-table-column>
-        <el-table-column label="等级" width="90">
+        <el-table-column prop="level" label="等级" width="90" sortable>
           <template #default="{ row }">
             <el-tag size="small" :color="levelColor(row.level)" effect="dark">{{ row.level }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="时间" width="170">
+        <el-table-column prop="created_at" label="时间" width="170" sortable>
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
       </el-table>

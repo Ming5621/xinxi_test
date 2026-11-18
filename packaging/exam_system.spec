@@ -91,6 +91,7 @@ hiddenimports = [
     "tkinter.messagebox",
     "zoneinfo",
     "app.timeutil",
+    "app.sync_pack",
 ]
 
 # Windows 没有系统 IANA 时区库。zoneinfo 运行时用 importlib.resources 按字符串

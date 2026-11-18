@@ -15,6 +15,7 @@
 - 启动窗口底部带版本号。等待秒数会从 0 继续增加，服务就绪后自动打开浏览器
 - 若仍失败，请查看 `%APPDATA%\微机教室考试系统\launcher.log` 与 `server.log`
 - 若 `server.log` 里出现 `No time zone found with key Asia/Shanghai`，请下载 **v1.2.11** 及以上
+- 教师可新建班级、批量导入学生；换教室时用「导出教师数据 / 导入教师数据」同步
 
 ## 功能特性
 

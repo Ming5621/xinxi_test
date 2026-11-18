@@ -10,7 +10,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { classApi } from '@/api'
 
 defineProps({
@@ -22,8 +22,17 @@ defineEmits(['update:modelValue'])
 
 const classes = ref([])
 
-onMounted(async () => {
+async function loadClasses() {
   const res = await classApi.list()
   classes.value = res.classes || []
+}
+
+onMounted(() => {
+  loadClasses()
+  window.addEventListener('exam-classes-changed', loadClasses)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('exam-classes-changed', loadClasses)
 })
 </script>

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import require_teacher
 from ..database import get_db
 from ..models import Exam, ExamSession, SessionStatus, User, UserRole
-from ..permissions import apply_student_scope, filter_class_name, get_assigned_classes
+from ..permissions import apply_student_scope, filter_class_name, student_in_scope
 from ..schemas import ClassExamStat, DashboardStats, ExamStatistics, QuestionStat
 from ..timeutil import utc_now
 
@@ -76,13 +76,10 @@ def exam_statistics(
         .filter(ExamSession.exam_id == exam_id)
         .all()
     )
-    classes = get_assigned_classes(current_user)
     filtered = []
     for s in sessions:
         stu = s.student
-        if not stu:
-            continue
-        if classes is not None and stu.class_name not in classes:
+        if not stu or not student_in_scope(current_user, stu):
             continue
         if class_name and stu.class_name != class_name:
             continue

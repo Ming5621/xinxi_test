@@ -1,8 +1,10 @@
 import io
 from urllib.parse import quote
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy.orm import Session, joinedload
 
@@ -18,7 +20,8 @@ from ..models import (
     User,
     UserRole,
 )
-from ..permissions import apply_student_scope, ensure_class_access, filter_class_name, get_assigned_classes
+from ..permissions import apply_student_scope, ensure_class_access, filter_class_name, student_in_scope
+from ..sync_pack import build_teacher_pack, pack_filename
 from ..timeutil import format_local
 from ..typing_utils import DEFAULT_TYPING_CONFIG, get_typing_level, score_typing_question
 
@@ -72,6 +75,24 @@ def export_students(
     return _workbook_response(wb, f"学生名单_{suffix}.xlsx")
 
 
+@router.get("/teacher-pack")
+def export_teacher_pack(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    payload = build_teacher_pack(db, current_user)
+    filename = pack_filename(current_user)
+    encoded = quote(filename)
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename=teacher-pack.json; filename*=UTF-8''{encoded}",
+        },
+    )
+
+
 @router.get("/exams/{exam_id}/results")
 def export_exam_results(
     exam_id: int,
@@ -90,13 +111,10 @@ def export_exam_results(
         .filter(ExamSession.exam_id == exam_id)
         .all()
     )
-    classes = get_assigned_classes(current_user)
     rows = []
     for s in sessions:
         stu = s.student
-        if not stu:
-            continue
-        if classes is not None and stu.class_name not in classes:
+        if not stu or not student_in_scope(current_user, stu):
             continue
         if class_name and stu.class_name != class_name:
             continue
@@ -139,17 +157,12 @@ def export_typing_records(
         student = db.query(User).filter(User.id == student_id, User.role == UserRole.student).first()
         if not student:
             raise HTTPException(status_code=404, detail="学生不存在")
-        ensure_class_access(current_user, student.class_name)
+        if not student_in_scope(current_user, student):
+            raise HTTPException(status_code=403, detail="无权访问该学生数据")
         query = query.filter(TypingRecord.student_id == student_id)
     else:
-        classes = get_assigned_classes(current_user)
-        if classes is not None:
-            if class_name:
-                query = query.join(User).filter(User.class_name == class_name)
-            else:
-                query = query.join(User).filter(User.class_name.in_(classes))
-        elif class_name:
-            query = query.join(User).filter(User.class_name == class_name)
+        visible_ids = [u.id for u in apply_student_scope(db.query(User), current_user, class_name).all()]
+        query = query.filter(TypingRecord.student_id.in_(visible_ids or [-1]))
 
     records = query.limit(2000).all()
     wb = Workbook()
@@ -196,15 +209,7 @@ _SESSION_STATUS = {
 
 def _typing_summary_rows(db: Session, current_user: User, class_name: str | None) -> list[dict]:
     """与打字统计页同一口径：按学生汇总最近练习。"""
-    query = db.query(User).filter(User.role == UserRole.student, User.is_active == True)
-    classes = get_assigned_classes(current_user)
-    if classes is not None:
-        if class_name:
-            query = query.filter(User.class_name == class_name)
-        else:
-            query = query.filter(User.class_name.in_(classes))
-    elif class_name:
-        query = query.filter(User.class_name == class_name)
+    query = apply_student_scope(db.query(User), current_user, class_name).filter(User.is_active == True)
     students = query.order_by(User.class_name, User.id).all()
 
     rows = []

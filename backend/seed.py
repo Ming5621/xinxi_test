@@ -50,6 +50,8 @@ def _migrate_schema() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN last_seen_at DATETIME"))
             if "assigned_classes" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN assigned_classes JSON DEFAULT '[]'"))
+            if "managed_by_teacher_id" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN managed_by_teacher_id INTEGER"))
 
     if "typing_records" in tables:
         typing_cols = {c["name"] for c in inspector.get_columns("typing_records")}
@@ -113,7 +115,7 @@ def run_seed(*, quiet: bool = False) -> None:
                 if existing.name != name:
                     existing.name = name
                     need = True
-                if existing.assigned_classes != [SHARED_CLASS]:
+                if not existing.assigned_classes:
                     existing.assigned_classes = [SHARED_CLASS]
                     need = True
                 if not existing.is_active:
@@ -126,7 +128,7 @@ def run_seed(*, quiet: bool = False) -> None:
 
         for old_name in ("teacher", "teacher2"):
             old = db.query(User).filter(User.username == old_name).first()
-            if old and old.role == UserRole.teacher and old.assigned_classes != [SHARED_CLASS]:
+            if old and old.role == UserRole.teacher and not old.assigned_classes:
                 old.assigned_classes = [SHARED_CLASS]
                 changed = True
                 if not quiet:

@@ -71,23 +71,23 @@
       </div>
       <el-table :data="sessionDetail?.records || []" stripe max-height="420" v-loading="detailLoading">
         <el-table-column type="index" label="#" width="50" />
-        <el-table-column prop="student_name" label="姓名" width="100" />
-        <el-table-column prop="class_name" label="班级" width="110" />
-        <el-table-column label="评分" width="80">
+        <el-table-column prop="student_name" label="姓名" width="100" sortable />
+        <el-table-column prop="class_name" label="班级" width="110" sortable />
+        <el-table-column prop="score" label="评分" width="80" sortable>
           <template #default="{ row }"><strong>{{ row.score }}</strong></template>
         </el-table-column>
-        <el-table-column label="速度" width="110">
+        <el-table-column prop="wpm" label="速度" width="110" sortable>
           <template #default="{ row }">{{ row.wpm }} 字/分</template>
         </el-table-column>
-        <el-table-column label="准确率" width="90">
+        <el-table-column prop="accuracy" label="准确率" width="90" sortable>
           <template #default="{ row }">{{ row.accuracy }}%</template>
         </el-table-column>
-        <el-table-column label="等级" width="90">
+        <el-table-column prop="level" label="等级" width="90" sortable>
           <template #default="{ row }">
             <el-tag size="small" effect="dark">{{ row.level }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="提交时间" width="170">
+        <el-table-column prop="created_at" label="提交时间" width="170" sortable>
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
       </el-table>

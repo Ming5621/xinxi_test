@@ -22,6 +22,9 @@
             <el-radio-button value="student">学生</el-radio-button>
           </el-radio-group>
         </div>
+        <el-button @click="handleExportPack">导出全部数据</el-button>
+        <el-button @click="packFileRef?.click()">导入数据包</el-button>
+        <input ref="packFileRef" type="file" accept=".json,application/json" class="hidden-file" @change="handleImportPack" />
         <el-button type="primary" @click="showDialog()">
           <el-icon><Plus /></el-icon> 添加账号
         </el-button>
@@ -141,7 +144,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { classApi, userApi } from '@/api'
+import { classApi, exportApi, importApi, userApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -154,6 +157,7 @@ const roleFilter = ref('')
 const dialogVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
+const packFileRef = ref()
 const form = ref(emptyForm())
 
 const rules = {
@@ -315,6 +319,22 @@ async function loadUsers() {
   mergeClasses(users.value)
 }
 
+async function handleExportPack() {
+  await exportApi.teacherPack()
+  ElMessage.success('已导出数据包，可在另一台机器导入')
+}
+
+async function handleImportPack(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const result = await importApi.teacherPackFile(file)
+  await loadUsers()
+  ElMessage.success(
+    `导入完成：学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}，考试 ${result?.exam_count || 0}`
+  )
+}
+
 onMounted(async () => {
   const res = await classApi.list()
   knownClasses.value = res.classes || []
@@ -360,5 +380,9 @@ onMounted(async () => {
 
 .field-hint {
   margin: 0 0 12px 90px;
+}
+
+.hidden-file {
+  display: none;
 }
 </style>
