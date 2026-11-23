@@ -714,9 +714,17 @@ class LauncherApp:
 
 
 def serve_main(port: int) -> int:
+    original_stdout, original_stderr = sys.stdout, sys.stderr
+    server_log = None
     try:
         t0 = time.time()
-        setup_environment()
+        _, data_dir = setup_environment()
+        if sys.stdout is None or sys.stderr is None:
+            server_log = (data_dir / "server.log").open("a", encoding="utf-8", buffering=1)
+            if sys.stdout is None:
+                sys.stdout = server_log
+            if sys.stderr is None:
+                sys.stderr = server_log
         write_log(f"serve setup done {time.time() - t0:.2f}s")
         init_database()
         write_log(f"serve db ready {time.time() - t0:.2f}s")
@@ -728,6 +736,10 @@ def serve_main(port: int) -> int:
         write_log(f"serve_main failed: {e}\n{traceback.format_exc()}")
         print(f"服务启动失败: {e}", file=sys.stderr)
         return 1
+    finally:
+        sys.stdout, sys.stderr = original_stdout, original_stderr
+        if server_log is not None:
+            server_log.close()
 
 
 def main() -> int:
