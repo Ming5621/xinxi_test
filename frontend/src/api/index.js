@@ -9,13 +9,13 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  if (token && !config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
 function handleUnauthorized(error) {
   const url = error.config?.url || ''
-  const isLoginRequest = url.includes('/auth/login') || url.includes('/auth/student-login')
+  const isLoginRequest = ['/auth/login', '/auth/student-login', '/auth/student-password'].includes(url)
   if (isLoginRequest) {
     const msg = error.response?.data?.detail || '登录失败'
     ElMessage.error(typeof msg === 'string' ? msg : '登录失败')
@@ -65,12 +65,20 @@ async function downloadExport(path, params = {}, filename = 'export.xlsx') {
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
   studentLogin: (data) => api.post('/auth/student-login', data),
+  changeStudentPassword: (token, newPassword) => api.post(
+    '/auth/student-password',
+    { new_password: newPassword },
+    { headers: { Authorization: `Bearer ${token}` } },
+  ),
+  studentClasses: () => api.get('/auth/student-classes'),
   me: () => api.get('/auth/me'),
 }
 
 export const classApi = {
   list: () => api.get('/classes'),
-  create: (name) => api.post('/classes', { name }),
+  create: (data) => api.post('/classes', data),
+  update: (data) => api.put('/classes', data),
+  delete: (name) => api.delete('/classes', { params: { name } }),
 }
 
 export const userApi = {
@@ -81,12 +89,14 @@ export const userApi = {
 }
 
 export const importApi = {
-  students: (data) => api.post('/import/students', data),
-  studentsFile: (file, defaultPassword = '123456') => {
+  students: (data) => api.post('/import/students', data, { timeout: 180000 }),
+  studentsFile: (file, defaultPassword = '123456', updateExisting = false) => {
     const form = new FormData()
     form.append('file', file)
-    return api.post(`/import/students/file?default_password=${defaultPassword}`, form, {
+    return api.post('/import/students/file', form, {
+      params: { default_password: defaultPassword, update_existing: updateExisting },
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000,
     })
   },
   parseQuestions: (data) => api.post('/import/questions/parse', data),

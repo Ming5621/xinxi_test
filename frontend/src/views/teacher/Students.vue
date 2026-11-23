@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>学生动态</h1>
-      <p>可新建班级、批量导入学生；导入的学生只对本教师可见。换教室时导出教师数据再导入即可同步。</p>
+      <p>可管理和导入已分配班级的学生。班级分配由管理员维护。</p>
     </div>
 
     <div class="content-card">
@@ -16,25 +16,24 @@
             <span class="online-dot"></span>
             在线 {{ onlineCount }} / {{ students.length }}
           </span>
-          <el-button @click="showCreateClass">新建班级</el-button>
           <el-button @click="handleExportPack">导出教师数据</el-button>
           <el-button @click="packFileRef?.click()">导入教师数据</el-button>
           <input ref="packFileRef" type="file" accept=".json,application/json" class="hidden-file" @change="handleImportPack" />
           <el-button @click="handleExport">
             <el-icon><Download /></el-icon> 导出 Excel
           </el-button>
-          <el-button @click="importVisible = true">
+          <el-button :disabled="!availableClasses.length" @click="importVisible = true">
             <el-icon><Upload /></el-icon> 批量导入
           </el-button>
-          <el-button type="primary" @click="showDialog()">
+          <el-button type="primary" :disabled="!availableClasses.length" @click="showDialog()">
             <el-icon><Plus /></el-icon> 添加学生
           </el-button>
         </div>
       </div>
 
       <el-table :data="filteredStudents" stripe v-loading="loading">
-        <el-table-column prop="username" label="用户名" width="140" sortable />
-        <el-table-column prop="name" label="姓名" width="120" sortable />
+        <el-table-column prop="username" label="账号编号" width="140" sortable />
+        <el-table-column prop="name" label="姓名（登录名）" width="140" sortable />
         <el-table-column prop="class_name" label="班级" width="140" sortable />
         <el-table-column label="在线" width="100">
           <template #default="{ row }">
@@ -54,42 +53,28 @@
         <el-table-column label="最近活跃" width="180">
           <template #default="{ row }">{{ formatLastSeen(row.last_seen_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="showDialog(row)">编辑</el-button>
+            <el-button link type="warning" @click="handleResetPassword(row)">重置密码</el-button>
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <el-dialog v-model="classDialogVisible" title="新建班级" width="420px">
-      <el-form @submit.prevent="handleCreateClass">
-        <el-form-item label="班级名称">
-          <el-input v-model="newClassName" placeholder="例如：微机1班" maxlength="100" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="classDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="savingClass" @click="handleCreateClass">创建</el-button>
-      </template>
-    </el-dialog>
-
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑学生' : '添加学生'" width="480px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" :disabled="!!editing" />
-        </el-form-item>
         <el-form-item label="姓名" prop="name">
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="班级" prop="class_name">
-          <el-select v-model="form.class_name" placeholder="选择班级" style="width: 100%" filterable allow-create>
+          <el-select v-model="form.class_name" placeholder="选择班级" style="width: 100%" filterable>
             <el-option v-for="c in availableClasses" :key="c" :label="c" :value="c" />
           </el-select>
         </el-form-item>
-        <el-form-item label="密码" :prop="editing ? '' : 'password'">
-          <el-input v-model="form.password" type="password" :placeholder="editing ? '留空则不修改' : '请输入密码'" show-password />
+        <el-form-item v-if="!editing" label="初始密码">
+          <el-input v-model="form.password" type="password" placeholder="留空使用 123456" show-password />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -101,11 +86,8 @@
     <BatchImportDialog
       v-model="importVisible"
       title="批量导入学生"
-      format-hint="支持 CSV/TXT 格式，每行一个学生。可带表头（用户名,姓名,班级,密码），密码可留空使用默认值。"
-      placeholder="用户名,姓名,班级,密码
-student06,张三,微机1班,123456
-student07,李四,微机2班,
-student08,王五,微机2班,123456"
+      format-hint="填写姓名、班级和初始密码。班级留空时使用首个已分配班级，密码可留空，用户名由系统生成。"
+      :placeholder="studentTemplate"
       template-filename="学生导入模板.csv"
       :template-content="studentTemplate"
       :show-default-password="true"
@@ -129,10 +111,10 @@ import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import ClassFilter from '@/components/ClassFilter.vue'
 import { formatDateTime } from '@/utils/datetime'
 
-const studentTemplate = `用户名,姓名,班级,密码
-student06,张三,微机1班,123456
-student07,李四,微机2班,
-student08,王五,微机2班,123456`
+const studentTemplate = `姓名,班级,密码
+张三,微机1班,123456
+李四,微机2班,
+王五,微机2班,123456`
 
 const loading = ref(true)
 const saving = ref(false)
@@ -141,19 +123,14 @@ const availableClasses = ref([])
 const classFilter = ref('')
 const search = ref('')
 const dialogVisible = ref(false)
-const classDialogVisible = ref(false)
 const importVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
 const packFileRef = ref()
-const newClassName = ref('')
-const savingClass = ref(false)
-const form = ref({ username: '', name: '', class_name: '', password: '' })
+const form = ref({ name: '', class_name: '', password: '' })
 
 const rules = {
-  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
 const filteredStudents = computed(() => {
@@ -175,8 +152,8 @@ function formatLastSeen(value) {
 function showDialog(row = null) {
   editing.value = row
   form.value = row
-    ? { username: row.username, name: row.name, class_name: row.class_name, password: '' }
-    : { username: '', name: '', class_name: '', password: '' }
+    ? { name: row.name, class_name: row.class_name, password: '' }
+    : { name: '', class_name: availableClasses.value[0] || '', password: '' }
   dialogVisible.value = true
 }
 
@@ -185,9 +162,7 @@ async function handleSave() {
   saving.value = true
   try {
     if (editing.value) {
-      const data = { name: form.value.name, class_name: form.value.class_name }
-      if (form.value.password) data.password = form.value.password
-      await userApi.update(editing.value.id, data)
+      await userApi.update(editing.value.id, { name: form.value.name, class_name: form.value.class_name })
       ElMessage.success('更新成功')
     } else {
       await userApi.create({ ...form.value, role: 'student' })
@@ -199,6 +174,27 @@ async function handleSave() {
   } finally {
     saving.value = false
   }
+}
+
+async function handleResetPassword(row) {
+  const result = await ElMessageBox.prompt(
+    `为「${row.name}」设置临时密码。重置后，学生需要重新登录并修改初始密码。`,
+    '重置学生密码',
+    {
+      inputType: 'password',
+      inputPlaceholder: '输入临时密码',
+      inputValidator: (value) => (
+        !!value?.trim() && new TextEncoder().encode(value.trim()).length <= 72
+        || '请输入临时密码（最多 72 字节）'
+      ),
+      confirmButtonText: '确认重置',
+      cancelButtonText: '取消',
+    },
+  ).catch(() => null)
+  if (!result) return
+  await userApi.update(row.id, { password: result.value })
+  ElMessage.success('已重置密码')
+  await loadStudents()
 }
 
 async function handleDelete(row) {
@@ -218,28 +214,6 @@ async function loadClasses() {
   window.dispatchEvent(new Event('exam-classes-changed'))
 }
 
-function showCreateClass() {
-  newClassName.value = ''
-  classDialogVisible.value = true
-}
-
-async function handleCreateClass() {
-  const name = newClassName.value.trim()
-  if (!name) {
-    ElMessage.warning('请输入班级名称')
-    return
-  }
-  savingClass.value = true
-  try {
-    await classApi.create(name)
-    ElMessage.success(`已创建班级「${name}」`)
-    classDialogVisible.value = false
-    await loadClasses()
-  } finally {
-    savingClass.value = false
-  }
-}
-
 async function handleExportPack() {
   await exportApi.teacherPack()
   ElMessage.success('已导出教师数据，可在另一台教师机导入')
@@ -256,7 +230,14 @@ async function handleImportPack(event) {
   const updated = result?.student_updated || 0
   const exams = result?.exam_count || 0
   const texts = result?.text_count || 0
-  ElMessage.success(`导入完成：学生新增 ${created}、更新 ${updated}，考试 ${exams}，文章 ${texts}`)
+  const summary = `学生新增 ${created}、更新 ${updated}，考试 ${exams}，文章 ${texts}`
+  if (result?.errors?.length) {
+    await ElMessageBox.alert([summary, ...result.errors].join('\n'), '导入结果', {
+      customClass: 'pack-import-result',
+    })
+  } else {
+    ElMessage.success(summary)
+  }
 }
 
 async function handleExport() {
@@ -284,6 +265,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+:global(.pack-import-result .el-message-box__message) {
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 45vh;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;

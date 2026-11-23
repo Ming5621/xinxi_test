@@ -3,13 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .auth import auth_signing_key, migrate_student_passwords
 from .database import Base, engine
 from .paths import get_static_dir
 from .routers import auth, classes, exams, export_data, import_data, presence, stats, typing, users
 
 Base.metadata.create_all(bind=engine)
+migrate_student_passwords(engine)
+auth_signing_key()
 
-app = FastAPI(title="微机教室考试系统", version="1.2.12")
+app = FastAPI(title="微机教室考试系统", version="1.2.13")
 
 app.add_middleware(
     CORSMiddleware,

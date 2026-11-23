@@ -61,6 +61,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default="0")
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.student)
     class_name = Column(String(100), default="")
@@ -74,7 +75,7 @@ class User(Base):
 
 
 class SchoolClass(Base):
-    """教师自建班级。同一教师下班级名唯一，不同教师可以有同名班级。"""
+    """旧版教师自建班级记录。"""
 
     __tablename__ = "school_classes"
     __table_args__ = (UniqueConstraint("teacher_id", "name", name="uq_teacher_class_name"),)
@@ -85,6 +86,19 @@ class SchoolClass(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     teacher = relationship("User", foreign_keys=[teacher_id])
+
+
+class ClassCatalog(Base):
+    __tablename__ = "class_catalog"
+
+    name = Column(String(100), primary_key=True)
+
+
+class AuthSigningKey(Base):
+    __tablename__ = "auth_signing_key"
+
+    id = Column(Integer, primary_key=True)
+    secret = Column(String(255), nullable=False)
 
 
 class Exam(Base):

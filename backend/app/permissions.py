@@ -1,11 +1,14 @@
 """权限与班级数据范围控制"""
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Query
-from sqlalchemy.orm.attributes import flag_modified
 
-from .models import SchoolClass, User, UserRole
+from .models import ClassCatalog, SchoolClass, TypingClassSession, TypingClassSessionStatus, User, UserRole
+from .timeutil import utc_now
+
+DEFAULT_STUDENT_CLASS = "课堂"
 
 
 def is_admin(user: User) -> bool:
@@ -25,32 +28,50 @@ def get_assigned_classes(user: User) -> list[str] | None:
     return []
 
 
-def claim_class_for_teacher(db, user: User, class_name: str) -> str:
-    """教师新建或认领班级，写入 assigned_classes 与 school_classes。管理员只规范化名称。"""
+def resolve_student_class(user: User, class_name: str | None) -> str:
     class_name = (class_name or "").strip()
-    if user.role == UserRole.admin:
-        return class_name
-    if user.role != UserRole.teacher:
-        raise HTTPException(status_code=403, detail="无权管理班级")
+    assigned = get_assigned_classes(user)
+    if len(class_name) > 100:
+        raise HTTPException(status_code=400, detail="班级名称不能超过100个字符")
     if not class_name:
-        assigned = list(user.assigned_classes or [])
-        return assigned[0] if assigned else "课堂"
-
-    assigned = list(user.assigned_classes or [])
-    if class_name not in assigned:
-        assigned.append(class_name)
-        user.assigned_classes = assigned
-        flag_modified(user, "assigned_classes")
-
-    exists = (
-        db.query(SchoolClass)
-        .filter(SchoolClass.teacher_id == user.id, SchoolClass.name == class_name)
-        .first()
-    )
-    if not exists:
-        db.add(SchoolClass(teacher_id=user.id, name=class_name))
-        db.flush()
+        class_name = assigned[0] if assigned else DEFAULT_STUDENT_CLASS
+    ensure_class_access(user, class_name)
     return class_name
+
+
+def remember_class(db, name: str) -> None:
+    db.execute(insert(ClassCatalog).values(name=name).on_conflict_do_nothing())
+
+
+def set_teacher_classes(db, teacher: User, names: list[str]) -> None:
+    for name in set(teacher.assigned_classes or []) | set(names):
+        remember_class(db, name)
+    teacher.assigned_classes = names
+    db.query(User).filter(
+        User.role == UserRole.student,
+        User.managed_by_teacher_id == teacher.id,
+        ~User.class_name.in_(names),
+    ).update({User.managed_by_teacher_id: None}, synchronize_session="fetch")
+    db.query(TypingClassSession).filter(
+        TypingClassSession.teacher_id == teacher.id,
+        TypingClassSession.status == TypingClassSessionStatus.active,
+        ~TypingClassSession.class_name.in_(names),
+    ).update({
+        TypingClassSession.status: TypingClassSessionStatus.ended,
+        TypingClassSession.ended_at: utc_now(),
+    }, synchronize_session="fetch")
+
+
+def teacher_can_manage_class(teacher: User | None, class_name: str) -> bool:
+    return bool(
+        teacher and teacher.role == UserRole.teacher and teacher.is_active
+        and class_name in (teacher.assigned_classes or [])
+    )
+
+
+def validate_student_teacher(teacher: User | None, class_name: str) -> None:
+    if not teacher_can_manage_class(teacher, class_name):
+        raise HTTPException(status_code=400, detail=f"请选择已分配到「{class_name}」的启用教师账号")
 
 
 def student_in_scope(viewer: User, student: User | None) -> bool:
@@ -61,11 +82,10 @@ def student_in_scope(viewer: User, student: User | None) -> bool:
         return True
     if viewer.role != UserRole.teacher:
         return False
-    if student.managed_by_teacher_id == viewer.id:
-        return True
-    if student.managed_by_teacher_id is None:
-        return bool(student.class_name) and student.class_name in (viewer.assigned_classes or [])
-    return False
+    return (
+        student.class_name in (viewer.assigned_classes or [])
+        and student.managed_by_teacher_id in (None, viewer.id)
+    )
 
 
 def ensure_class_access(user: User, class_name: str) -> None:
@@ -81,8 +101,6 @@ def filter_class_name(user: User, class_name: str | None) -> str | None:
     classes = get_assigned_classes(user)
     if classes is None:
         return class_name
-    if not classes:
-        raise HTTPException(status_code=403, detail="未分配管理班级")
     if class_name:
         if class_name not in classes:
             raise HTTPException(status_code=403, detail="无权访问该班级数据")
@@ -108,43 +126,26 @@ def apply_student_scope(query: Query, user: User, class_name: str | None = None)
             raise HTTPException(status_code=403, detail="无权访问该班级数据")
         query = query.filter(UserModel.class_name == class_name)
 
-    bound = UserModel.managed_by_teacher_id == user.id
-    legacy = and_(UserModel.managed_by_teacher_id.is_(None), UserModel.class_name.in_(classes))
-    return query.filter(or_(bound, legacy))
+    return query.filter(
+        UserModel.class_name.in_(classes),
+        or_(UserModel.managed_by_teacher_id == user.id, UserModel.managed_by_teacher_id.is_(None)),
+    )
 
 
 def list_accessible_classes(user: User, db) -> list[str]:
-    from .models import User as UserModel
-
-    names: list[str] = []
-    seen: set[str] = set()
-
-    def add(name: str | None) -> None:
-        if name and name not in seen:
-            seen.add(name)
-            names.append(name)
-
     assigned = get_assigned_classes(user)
-    if assigned is None:
-        rows = (
-            db.query(UserModel.class_name)
-            .filter(UserModel.role == UserRole.student, UserModel.class_name != "")
-            .distinct()
-            .all()
-        )
-        for row in rows:
-            add(row[0])
-        owned = db.query(SchoolClass.name).distinct().all()
-        for row in owned:
-            add(row[0])
-        return sorted(names)
+    if assigned is not None:
+        return assigned
+    return list_all_classes(db)
 
-    for name in assigned:
-        add(name)
-    owned = db.query(SchoolClass.name).filter(SchoolClass.teacher_id == user.id).all()
-    for row in owned:
-        add(row[0])
-    return names
+
+def list_all_classes(db) -> list[str]:
+    names = {name for name, in db.query(ClassCatalog.name)}
+    names.update(name for name, in db.query(SchoolClass.name).distinct())
+    names.update(name for name, in db.query(User.class_name).filter(User.role == UserRole.student).distinct())
+    for classes, in db.query(User.assigned_classes).filter(User.role == UserRole.teacher):
+        names.update(classes or [])
+    return sorted(name for name in names if name)
 
 
 def teacher_ids_for_class(db, class_name: str) -> list[int]:

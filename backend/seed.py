@@ -50,6 +50,10 @@ def _migrate_schema() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN last_seen_at DATETIME"))
             if "assigned_classes" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN assigned_classes JSON DEFAULT '[]'"))
+                conn.execute(
+                    text("UPDATE users SET assigned_classes = :classes WHERE role = 'teacher'"),
+                    {"classes": f'["{SHARED_CLASS}"]'},
+                )
             if "managed_by_teacher_id" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN managed_by_teacher_id INTEGER"))
 
@@ -72,11 +76,15 @@ def run_seed(*, quiet: bool = False) -> None:
     """创建/迁移数据库并填充默认账号与示例数据。可重复调用，已初始化时几乎瞬时返回。"""
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
+    from app.auth import migrate_student_passwords
+
+    migrate_student_passwords(engine)
 
     db = SessionLocal()
     changed = False
 
     try:
+        is_new_database = db.query(User.id).first() is None
         if db.query(User).filter(User.username == "admin").first() is None:
             db.add(
                 User(
@@ -92,9 +100,8 @@ def run_seed(*, quiet: bool = False) -> None:
             if not quiet:
                 print("✓ 创建管理员账号: admin / admin123")
 
-        for username, name, password in TEACHER_ACCOUNTS:
-            existing = db.query(User).filter(User.username == username).first()
-            if existing is None:
+        if is_new_database:
+            for username, name, password in TEACHER_ACCOUNTS:
                 db.add(
                     User(
                         username=username,
@@ -107,33 +114,6 @@ def run_seed(*, quiet: bool = False) -> None:
                 changed = True
                 if not quiet:
                     print(f"✓ 创建教师账号: {username} / {password} ({name})")
-            else:
-                need = False
-                if existing.role != UserRole.teacher:
-                    existing.role = UserRole.teacher
-                    need = True
-                if existing.name != name:
-                    existing.name = name
-                    need = True
-                if not existing.assigned_classes:
-                    existing.assigned_classes = [SHARED_CLASS]
-                    need = True
-                if not existing.is_active:
-                    existing.is_active = True
-                    need = True
-                if need:
-                    changed = True
-                    if not quiet:
-                        print(f"✓ 更新教师账号: {username} → 管理「{SHARED_CLASS}」")
-
-        for old_name in ("teacher", "teacher2"):
-            old = db.query(User).filter(User.username == old_name).first()
-            if old and old.role == UserRole.teacher and not old.assigned_classes:
-                old.assigned_classes = [SHARED_CLASS]
-                changed = True
-                if not quiet:
-                    print(f"✓ 兼容旧账号 {old_name}：班级改为「{SHARED_CLASS}」")
-
         if changed:
             db.commit()
 
@@ -277,7 +257,7 @@ def run_seed(*, quiet: bool = False) -> None:
         if not quiet:
             print("\n数据库初始化完成！")
             print("教师账号: teacher1~teacher4 / teacher123")
-            print("学生: 登录页输入姓名即可（无需预设账号）")
+            print("学生: 选择班级，使用姓名和密码登录")
     finally:
         db.close()
 

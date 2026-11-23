@@ -40,7 +40,7 @@ packaging\build_windows.bat
 packaging\build_installer.bat
 ```
 
-生成：`release\微机教室考试系统_Setup.exe`
+生成：`release\ExamSystem-Setup.exe`
 
 ---
 

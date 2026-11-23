@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .models import ExamStatus, QuestionType, SessionStatus, TypingClassSessionStatus, TypingDifficulty, UserRole
 from .timeutil import UtcDateTime
@@ -14,7 +14,8 @@ class LoginRequest(BaseModel):
 
 
 class StudentLoginRequest(BaseModel):
-    name: str
+    username: str
+    password: str
     class_name: str = "课堂"
 
 
@@ -22,6 +23,14 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: "UserOut"
+
+
+class StudentPasswordChallenge(BaseModel):
+    password_change_token: str
+
+
+class StudentPasswordChange(BaseModel):
+    new_password: str
 
 
 # User
@@ -34,8 +43,10 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    # 学生姓名登录不使用密码；留空时由服务端生成随机密码
+    username: str | None = None
+    # 学生密码留空时使用统一的初始密码
     password: Optional[str] = None
+    managed_by_teacher_id: int | None = None
 
 
 class UserUpdate(BaseModel):
@@ -46,14 +57,21 @@ class UserUpdate(BaseModel):
     assigned_classes: Optional[list[str]] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+    managed_by_teacher_id: int | None = None
 
 
 class UserOut(UserBase):
     id: int
     is_active: bool
     created_at: UtcDateTime
+    managed_by_teacher_id: int | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_validator("assigned_classes", mode="before")
+    @classmethod
+    def empty_class_list(cls, value):
+        return [] if value is None else value
 
 
 # Question
@@ -240,11 +258,13 @@ class BatchImportRequest(BaseModel):
     text: str
     default_password: str = "123456"
     default_score: float = 10.0
+    update_existing: bool = False
 
 
 class BatchImportResult(BaseModel):
     success_count: int
     fail_count: int
+    updated_count: int = 0
     errors: list[str] = []
     preview: list[dict] = []
 

@@ -20,6 +20,10 @@
           <el-icon><UserFilled /></el-icon>
           <span>账号管理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/classes">
+          <el-icon><Collection /></el-icon>
+          <span>班级管理</span>
+        </el-menu-item>
       </el-menu>
 
       <div class="sidebar-footer">
@@ -41,7 +45,7 @@
       <el-header class="top-header">
         <el-breadcrumb separator="/">
           <el-breadcrumb-item :to="{ path: '/admin' }">管理后台</el-breadcrumb-item>
-          <el-breadcrumb-item>账号管理</el-breadcrumb-item>
+          <el-breadcrumb-item>{{ route.name === 'AdminClasses' ? '班级管理' : '账号管理' }}</el-breadcrumb-item>
         </el-breadcrumb>
       </el-header>
       <el-main class="main-content">

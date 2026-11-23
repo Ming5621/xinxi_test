@@ -1,22 +1,23 @@
 import re
-import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..auth import get_password_hash, require_teacher
+from ..auth import DEFAULT_STUDENT_PASSWORD, get_password_hash, require_teacher
 from ..database import get_db
 from ..models import User, UserRole
 from ..permissions import (
     active_student_name_taken,
     apply_student_scope,
-    claim_class_for_teacher,
-    ensure_class_access,
     filter_class_name,
+    remember_class,
+    resolve_student_class,
+    set_teacher_classes,
     student_in_scope,
+    teacher_can_manage_class,
+    validate_student_teacher,
 )
 from ..schemas import UserCreate, UserOut, UserUpdate
-from .auth import DEFAULT_STUDENT_CLASS
 
 router = APIRouter(prefix="/api/users", tags=["用户管理"])
 
@@ -38,8 +39,8 @@ def _clean_username(username: str) -> str:
         raise HTTPException(status_code=400, detail="用户名不能为空")
     if len(username) > 50:
         raise HTTPException(status_code=400, detail="用户名不能超过50个字符")
-    if re.search(r"\s", username):
-        raise HTTPException(status_code=400, detail="用户名不能包含空格")
+    if re.search(r"[\r\n\t\x00]", username):
+        raise HTTPException(status_code=400, detail="用户名包含非法字符")
     return username
 
 
@@ -61,6 +62,8 @@ def _clean_class_list(classes: list[str] | None) -> list[str]:
     seen: list[str] = []
     for item in classes or []:
         name = (item or "").strip()
+        if len(name) > 100:
+            raise HTTPException(status_code=400, detail="班级名称不能超过100个字符")
         if name and name not in seen:
             seen.append(name)
     return seen
@@ -74,8 +77,8 @@ def _resolve_password(password: str | None, *, required: bool) -> str:
     if not cleaned:
         if required:
             raise HTTPException(status_code=400, detail="请设置密码")
-        return secrets.token_urlsafe(16)
-    if len(cleaned) > 72:
+        return DEFAULT_STUDENT_PASSWORD
+    if "\0" in cleaned or len(cleaned.encode("utf-8")) > 72:
         raise HTTPException(status_code=400, detail="密码过长")
     return cleaned
 
@@ -86,6 +89,17 @@ def _ensure_unique_username(db: Session, username: str, exclude_id: int | None =
         query = query.filter(User.id != exclude_id)
     if query.first():
         raise HTTPException(status_code=400, detail="用户名已存在")
+
+
+def default_username(db: Session, name: str) -> str:
+    username = _clean_username(name[:50])
+    base = username
+    index = 2
+    while db.query(User.id).filter(User.username == username).first():
+        suffix = f"_{index}"
+        username = f"{base[:50 - len(suffix)]}{suffix}"
+        index += 1
+    return username
 
 
 def _ensure_student_identity(db: Session, name: str, class_name: str, exclude_id: int | None = None) -> None:
@@ -102,6 +116,14 @@ def _count_other_active_admins(db: Session, user_id: int) -> int:
         .filter(User.role == UserRole.admin, User.is_active == True, User.id != user_id)  # noqa: E712
         .count()
     )
+
+
+def _check_assignment_fields(data: UserCreate | UserUpdate, current_user: User, role: UserRole) -> None:
+    assignment_fields = {"assigned_classes", "managed_by_teacher_id"}
+    if current_user.role == UserRole.teacher and assignment_fields.intersection(data.model_fields_set):
+        raise HTTPException(status_code=403, detail="仅管理员可编辑班级与教师绑定")
+    if role != UserRole.student and data.managed_by_teacher_id is not None:
+        raise HTTPException(status_code=400, detail="只有学生账号可以绑定教师")
 
 
 @router.get("", response_model=list[UserOut])
@@ -137,29 +159,35 @@ def create_user(
         raise HTTPException(status_code=400, detail="不能通过接口创建管理员")
     if data.role not in MANAGEABLE_ROLES:
         raise HTTPException(status_code=400, detail="不支持的角色")
+    _check_assignment_fields(data, current_user, data.role)
 
-    username = _clean_username(data.username)
-    _ensure_unique_username(db, username)
     name = _clean_name(data.name, for_student=data.role == UserRole.student)
     password = _resolve_password(data.password, required=data.role != UserRole.student)
 
     managed_by_teacher_id = None
     if data.role == UserRole.student:
-        class_name = (data.class_name or "").strip() or DEFAULT_STUDENT_CLASS
+        class_name = resolve_student_class(current_user, data.class_name)
         if current_user.role == UserRole.teacher:
-            class_name = claim_class_for_teacher(db, current_user, class_name)
             managed_by_teacher_id = current_user.id
         else:
-            ensure_class_access(current_user, class_name)
+            if data.managed_by_teacher_id is not None:
+                validate_student_teacher(db.get(User, data.managed_by_teacher_id), class_name)
+                managed_by_teacher_id = data.managed_by_teacher_id
+            remember_class(db, class_name)
         _ensure_student_identity(db, name, class_name)
         assigned_classes: list[str] = []
     else:
         class_name = ""
         assigned_classes = _clean_class_list(data.assigned_classes)
+        for name_of_class in assigned_classes:
+            remember_class(db, name_of_class)
 
+    username = _clean_username(data.username) if (data.username or "").strip() else default_username(db, name)
+    _ensure_unique_username(db, username)
     user = User(
         username=username,
         password_hash=get_password_hash(password),
+        must_change_password=data.role == UserRole.student,
         name=name,
         role=data.role,
         class_name=class_name,
@@ -187,6 +215,7 @@ def update_user(
 
     original_role = user.role
     original_active = bool(user.is_active)
+    original_class = user.class_name
     new_role = original_role
 
     if data.role is not None and data.role != original_role:
@@ -199,6 +228,7 @@ def update_user(
         if data.role not in MANAGEABLE_ROLES:
             raise HTTPException(status_code=400, detail="不支持的角色")
         new_role = data.role
+    _check_assignment_fields(data, current_user, new_role)
 
     if data.username is not None:
         username = _clean_username(data.username)
@@ -211,31 +241,43 @@ def update_user(
     if data.name is not None or (new_role == UserRole.student and original_role != UserRole.student):
         user.name = _clean_name(data.name if data.name is not None else user.name, for_student=new_role == UserRole.student)
 
+    if original_role == UserRole.teacher and new_role != UserRole.teacher:
+        set_teacher_classes(db, user, [])
+
     if new_role == UserRole.student:
         if data.class_name is not None or original_role != UserRole.student:
-            raw_class = data.class_name if data.class_name is not None else user.class_name
-            class_name = (raw_class or "").strip() or DEFAULT_STUDENT_CLASS
-            if current_user.role == UserRole.teacher:
-                class_name = claim_class_for_teacher(db, current_user, class_name)
-            else:
-                ensure_class_access(current_user, class_name)
-            user.class_name = class_name
-        if current_user.role == UserRole.teacher and user.managed_by_teacher_id is None:
-            user.managed_by_teacher_id = current_user.id
+            user.class_name = resolve_student_class(current_user, data.class_name)
+        if current_user.role == UserRole.admin:
+            if "managed_by_teacher_id" in data.model_fields_set:
+                if data.managed_by_teacher_id is not None:
+                    teacher = db.get(User, data.managed_by_teacher_id)
+                    if teacher is user:
+                        teacher = None
+                    validate_student_teacher(teacher, user.class_name)
+                user.managed_by_teacher_id = data.managed_by_teacher_id
+            elif user.managed_by_teacher_id is not None and user.class_name != original_class:
+                if not teacher_can_manage_class(db.get(User, user.managed_by_teacher_id), user.class_name):
+                    user.managed_by_teacher_id = None
+            if user.class_name:
+                remember_class(db, user.class_name)
         user.assigned_classes = []
     elif new_role == UserRole.teacher:
         if current_user.role == UserRole.admin and (
             data.assigned_classes is not None or original_role != UserRole.teacher
         ):
             source = data.assigned_classes if data.assigned_classes is not None else (user.assigned_classes or [])
-            user.assigned_classes = _clean_class_list(source)
+            set_teacher_classes(db, user, _clean_class_list(source))
         user.class_name = ""
+        user.managed_by_teacher_id = None
 
     user.role = new_role
 
-    if data.password:
-        password = _resolve_password(data.password, required=True)
+    if data.password or new_role != original_role:
+        password = _resolve_password(data.password, required=new_role != UserRole.student)
         user.password_hash = get_password_hash(password)
+        user.must_change_password = new_role == UserRole.student
+        if new_role == UserRole.student:
+            user.last_seen_at = None
 
     if data.is_active is not None and data.is_active != user.is_active:
         if data.is_active is False:
@@ -251,8 +293,8 @@ def update_user(
         or new_role != original_role
         or (data.is_active is True and not original_active)
     )
-    if user.role == UserRole.student and user.is_active and identity_touched:
-        _ensure_student_identity(db, user.name, user.class_name or "", exclude_id=user.id)
+    if user.role == UserRole.student and user.is_active and user.class_name and identity_touched:
+        _ensure_student_identity(db, user.name, user.class_name, exclude_id=user.id)
 
     db.commit()
     db.refresh(user)
@@ -275,6 +317,8 @@ def delete_user(
             raise HTTPException(status_code=400, detail="不能删除最后一名管理员")
         raise HTTPException(status_code=400, detail="不能删除管理员账号")
     _ensure_manage_user(current_user, user)
+    if user.role == UserRole.teacher:
+        set_teacher_classes(db, user, [])
     db.delete(user)
     db.commit()
     return {"message": "删除成功"}

@@ -53,7 +53,7 @@
       </div>
     </el-aside>
 
-    <el-container>
+    <el-container class="teacher-content">
       <el-header class="top-header">
         <el-breadcrumb separator="/">
           <el-breadcrumb-item :to="{ path: '/teacher' }">首页</el-breadcrumb-item>
@@ -115,9 +115,20 @@ async function handleLogout() {
   background: #1e1b4b;
   display: flex;
   flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.teacher-content {
+  min-width: 0;
 }
 
 .sidebar-brand {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -139,9 +150,12 @@ async function handleLogout() {
 .el-menu {
   border-right: none;
   flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .sidebar-footer {
+  flex-shrink: 0;
   padding: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }

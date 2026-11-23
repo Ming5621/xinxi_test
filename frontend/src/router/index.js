@@ -47,6 +47,7 @@ const routes = [
     meta: { requiresAuth: true, roles: ['admin'] },
     children: [
       { path: '', name: 'AdminAccounts', component: () => import('@/views/admin/Accounts.vue') },
+      { path: 'classes', name: 'AdminClasses', component: () => import('@/views/admin/Classes.vue') },
     ],
   },
   {

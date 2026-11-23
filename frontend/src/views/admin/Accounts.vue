@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>账号管理</h1>
-      <p>管理管理员、教师和学生账号。学生使用姓名登录；教师和管理员使用用户名与密码。</p>
+      <p>学生使用班级、本人姓名和密码登录。教师和管理员使用用户名与密码。</p>
     </div>
 
     <div class="content-card">
@@ -25,6 +25,7 @@
         <el-button @click="handleExportPack">导出全部数据</el-button>
         <el-button @click="packFileRef?.click()">导入数据包</el-button>
         <input ref="packFileRef" type="file" accept=".json,application/json" class="hidden-file" @change="handleImportPack" />
+        <el-button @click="importVisible = true">批量导入学生</el-button>
         <el-button type="primary" @click="showDialog()">
           <el-icon><Plus /></el-icon> 添加账号
         </el-button>
@@ -56,6 +57,12 @@
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
+        <el-table-column label="学生绑定教师" min-width="155">
+          <template #default="{ row }">
+            <span v-if="row.role === 'student'">{{ studentTeacherLabel(row.managed_by_teacher_id) }}</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
@@ -81,24 +88,34 @@
           </el-select>
           <el-input v-else model-value="管理员" disabled />
         </el-form-item>
-        <el-form-item label="用户名" prop="username">
+        <el-form-item v-if="editing" label="用户名" prop="username">
           <el-input v-model="form.username" />
         </el-form-item>
         <el-form-item label="姓名" prop="name">
           <el-input v-model="form.name" maxlength="100" />
         </el-form-item>
-        <el-form-item v-if="form.role === 'student'" label="班级" prop="class_name">
+        <el-form-item v-if="form.role === 'student'" label="班级" :prop="editing?.role === 'student' && !editing.class_name ? '' : 'class_name'">
           <el-select
             v-model="form.class_name"
             filterable
-            allow-create
-            default-first-option
-            placeholder="选择或输入班级"
+            placeholder="选择班级"
             style="width: 100%"
+            @change="onStudentClassChange"
           >
             <el-option v-for="c in knownClasses" :key="c" :label="c" :value="c" />
           </el-select>
-          <div class="hint">学生在登录页输入姓名后进入「课堂」。班级需与登录时一致，才能匹配到该账号。</div>
+        </el-form-item>
+        <el-form-item v-if="form.role === 'student'" label="绑定教师">
+          <el-select v-model="form.managed_by_teacher_id" placeholder="未单独绑定" clearable :value-on-clear="null" filterable style="width: 100%">
+            <el-option
+              v-for="teacher in eligibleTeachers"
+              :key="teacher.id"
+              :label="teacherLabel(teacher)"
+              :value="teacher.id"
+              :disabled="!teacher.is_active || !teacher.assigned_classes.includes(form.class_name)"
+            />
+          </el-select>
+          <div class="hint">未单独绑定时，该班级的所有管理教师均可管理此学生。</div>
         </el-form-item>
         <el-form-item v-if="form.role === 'teacher'" label="管理班级">
           <el-select
@@ -113,15 +130,15 @@
             <el-option v-for="c in knownClasses" :key="c" :label="c" :value="c" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="form.role !== 'student'" label="密码" :prop="passwordRequired ? 'password' : ''">
+        <el-form-item :label="form.role === 'student' ? '初始密码' : '密码'" :prop="passwordRequired ? 'password' : ''">
           <el-input
             v-model="form.password"
             type="password"
             show-password
-            :placeholder="passwordRequired ? '请输入密码' : '留空则不修改'"
+            :placeholder="passwordRequired ? '请输入密码' : form.role === 'student' && (!editing || editing.role !== 'student') ? '留空使用 123456' : '留空则不修改'"
           />
+          <div v-if="form.role === 'student' && editing?.role === 'student'" class="hint">填写后会重置密码，学生下次登录时必须修改。</div>
         </el-form-item>
-        <p v-else class="hint field-hint">学生使用姓名登录，无需设置密码。</p>
         <el-form-item v-if="editing" label="状态">
           <el-switch
             v-model="form.is_active"
@@ -137,6 +154,23 @@
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+    <BatchImportDialog
+      v-model="importVisible"
+      title="批量导入学生"
+      format-hint="用户名可省略。更新已有学生时，系统按姓名和班级匹配，旧表也可用用户名匹配。教师列留空保留有效绑定，填「未绑定」可解除。"
+      :placeholder="studentTemplate"
+      template-filename="学生导入模板.csv"
+      :template-content="studentTemplate"
+      show-default-password
+      show-update-existing
+      :preview-columns="[
+        { prop: 'username', label: '用户名' },
+        { prop: 'name', label: '姓名' },
+        { prop: 'class_name', label: '班级' },
+      ]"
+      :on-import="handleBatchImport"
+      @success="loadUsers"
+    />
   </div>
 </template>
 
@@ -146,6 +180,11 @@ import { Search, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { classApi, exportApi, importApi, userApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
+
+const studentTemplate = `姓名,班级,密码,教师用户名
+张三,课堂,,teacher1
+李四,课堂,,未绑定`
 
 const auth = useAuthStore()
 const loading = ref(true)
@@ -155,6 +194,7 @@ const knownClasses = ref([])
 const search = ref('')
 const roleFilter = ref('')
 const dialogVisible = ref(false)
+const importVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
 const packFileRef = ref()
@@ -196,15 +236,43 @@ const filteredUsers = computed(() => {
   })
 })
 
+const teachers = computed(() => users.value.filter((user) => user.role === 'teacher'))
+const eligibleTeachers = computed(() => teachers.value.filter((teacher) =>
+  teacher.id === form.value.managed_by_teacher_id
+  || (teacher.is_active && teacher.assigned_classes.includes(form.value.class_name))
+))
+
+function defaultClass() {
+  return knownClasses.value.includes('课堂') ? '课堂' : knownClasses.value[0] || ''
+}
+
 function emptyForm() {
   return {
     username: '',
     name: '',
     password: '',
     role: 'teacher',
-    class_name: '课堂',
+    class_name: '',
     assigned_classes: [],
+    managed_by_teacher_id: null,
     is_active: true,
+  }
+}
+
+function teacherLabel(teacher) {
+  const username = teacher.name === teacher.username ? '' : `（${teacher.username}）`
+  return `${teacher.name}${username}${teacher.is_active ? '' : ' · 已禁用'}`
+}
+
+function studentTeacherLabel(teacherId) {
+  const teacher = teachers.value.find((user) => user.id === teacherId)
+  return teacher ? teacherLabel(teacher) : teacherId ? '教师账号不可用' : '未单独绑定'
+}
+
+function onStudentClassChange(className) {
+  const teacher = teachers.value.find((user) => user.id === form.value.managed_by_teacher_id)
+  if (!teacher?.is_active || !teacher.assigned_classes.includes(className)) {
+    form.value.managed_by_teacher_id = null
   }
 }
 
@@ -228,18 +296,23 @@ function showDialog(row = null) {
         name: row.name,
         password: '',
         role: row.role,
-        class_name: row.class_name || '课堂',
+        class_name: row.class_name,
         assigned_classes: [...(row.assigned_classes || [])],
+        managed_by_teacher_id: row.managed_by_teacher_id,
         is_active: row.is_active,
       }
     : emptyForm()
+  if (!row) {
+    form.value.role = roleFilter.value === 'student' ? 'student' : 'teacher'
+    form.value.class_name = defaultClass()
+  }
   dialogVisible.value = true
   nextTick(() => formRef.value?.clearValidate())
 }
 
 async function onRoleChange() {
   if (form.value.role === 'student' && !form.value.class_name) {
-    form.value.class_name = '课堂'
+    form.value.class_name = defaultClass()
   }
   await nextTick()
   formRef.value?.clearValidate()
@@ -259,12 +332,15 @@ async function handleSave() {
         data.is_active = form.value.is_active
       }
       if (form.value.role === 'student') {
-        data.class_name = form.value.class_name
+        if (form.value.class_name) data.class_name = form.value.class_name
+        if (form.value.managed_by_teacher_id !== editing.value.managed_by_teacher_id) {
+          data.managed_by_teacher_id = form.value.managed_by_teacher_id
+        }
       }
       if (form.value.role === 'teacher') {
         data.assigned_classes = form.value.assigned_classes
       }
-      if (form.value.role !== 'student' && form.value.password) {
+      if (form.value.password) {
         data.password = form.value.password
       }
       const updated = await userApi.update(editing.value.id, data)
@@ -274,18 +350,19 @@ async function handleSave() {
       ElMessage.success('更新成功')
     } else {
       const data = {
-        username: form.value.username.trim(),
         name: form.value.name.trim(),
         role: form.value.role,
       }
       if (form.value.role === 'student') {
-        data.class_name = form.value.class_name || '课堂'
+        data.class_name = form.value.class_name
+        data.managed_by_teacher_id = form.value.managed_by_teacher_id
+        if (form.value.password) data.password = form.value.password
       } else {
         data.password = form.value.password
         data.assigned_classes = form.value.assigned_classes
       }
-      await userApi.create(data)
-      ElMessage.success('添加成功')
+      const created = await userApi.create(data)
+      ElMessage.success(created.role === 'teacher' ? `添加成功，登录用户名为 ${created.username}` : '添加成功')
     }
     dialogVisible.value = false
     await loadUsers()
@@ -302,21 +379,15 @@ async function handleDelete(row) {
   await loadUsers()
 }
 
-function mergeClasses(list) {
-  const set = new Set(knownClasses.value)
-  for (const user of list) {
-    if (user.class_name) set.add(user.class_name)
-    for (const name of user.assigned_classes || []) {
-      if (name) set.add(name)
-    }
-  }
-  if (!set.size) set.add('课堂')
-  knownClasses.value = [...set].sort()
+async function loadUsers() {
+  const [accounts, result] = await Promise.all([userApi.list(), classApi.list()])
+  users.value = accounts
+  knownClasses.value = result.classes
 }
 
-async function loadUsers() {
-  users.value = await userApi.list()
-  mergeClasses(users.value)
+async function handleBatchImport({ text, file, defaultPassword, updateExisting }) {
+  if (file) return importApi.studentsFile(file, defaultPassword, updateExisting)
+  return importApi.students({ text, default_password: defaultPassword, update_existing: updateExisting })
 }
 
 async function handleExportPack() {
@@ -336,10 +407,11 @@ async function handleImportPack(event) {
 }
 
 onMounted(async () => {
-  const res = await classApi.list()
-  knownClasses.value = res.classes || []
-  await loadUsers()
-  loading.value = false
+  try {
+    await loadUsers()
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 
@@ -376,10 +448,6 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.5;
   margin-top: 4px;
-}
-
-.field-hint {
-  margin: 0 0 12px 90px;
 }
 
 .hidden-file {

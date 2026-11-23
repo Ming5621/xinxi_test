@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" :title="title" width="720px" @closed="handleClosed">
+  <el-dialog v-model="visible" :title="title" width="720px" destroy-on-close @closed="handleClosed">
     <el-tabs v-model="activeTab">
       <el-tab-pane label="粘贴文本" name="text">
         <el-alert :title="formatHint" type="info" :closable="false" show-icon style="margin-bottom: 12px" />
@@ -44,6 +44,9 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+    <el-checkbox v-if="showUpdateExisting" v-model="updateExisting">
+      更新已有学生
+    </el-checkbox>
 
     <div v-if="previewItems.length" class="preview-section">
       <h4>预览（前 {{ previewItems.length }} 条）</h4>
@@ -61,7 +64,7 @@
 
     <template #footer>
       <el-button @click="downloadTemplate">下载模板</el-button>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">{{ errors.length || previewItems.length ? '关闭' : '取消' }}</el-button>
       <el-button type="primary" :loading="loading" @click="handleImport">
         {{ importMode === 'parse' ? '解析并添加' : '确认导入' }}
       </el-button>
@@ -79,6 +82,7 @@ const props = defineProps({
   importMode: { type: String, default: 'import' }, // import | parse
   showDefaultPassword: Boolean,
   showDefaultScore: Boolean,
+  showUpdateExisting: Boolean,
   formatHint: String,
   placeholder: String,
   templateContent: String,
@@ -99,6 +103,7 @@ const activeTab = ref('text')
 const textContent = ref('')
 const defaultPassword = ref('123456')
 const defaultScore = ref(10)
+const updateExisting = ref(false)
 const selectedFile = ref(null)
 const loading = ref(false)
 const previewItems = ref([])
@@ -111,6 +116,7 @@ watch(() => props.modelValue, (v) => {
     previewItems.value = []
     errors.value = []
     activeTab.value = 'text'
+    updateExisting.value = false
   }
 })
 
@@ -146,6 +152,7 @@ async function handleImport() {
         file: selectedFile.value,
         defaultPassword: defaultPassword.value,
         defaultScore: defaultScore.value,
+        updateExisting: updateExisting.value,
       })
     } else {
       if (!textContent.value.trim()) {
@@ -156,6 +163,7 @@ async function handleImport() {
         text: textContent.value,
         defaultPassword: defaultPassword.value,
         defaultScore: defaultScore.value,
+        updateExisting: updateExisting.value,
       })
     }
 
@@ -182,8 +190,14 @@ async function handleImport() {
       }))
       if (result.success_count > 0) {
         emit('success')
-        ElMessage.success(`成功导入 ${result.success_count} 名学生`)
-        visible.value = false
+        const updated = result.updated_count || 0
+        const summary = `新增 ${result.success_count - updated} 名，更新 ${updated} 名`
+        if (result.fail_count) {
+          ElMessage.warning(`${summary}，跳过 ${result.fail_count} 条`)
+        } else {
+          ElMessage.success(summary)
+          visible.value = false
+        }
       } else {
         ElMessage.warning('没有成功导入任何学生')
       }

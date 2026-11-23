@@ -43,8 +43,15 @@ def login(username, password):
 
 
 def student_login(name, class_name="课堂"):
-    code, data = req("POST", "/auth/student-login", {"name": name, "class_name": class_name})
-    return data["access_token"] if code == 200 else None
+    credentials = {"username": name, "password": "edge-student-pass", "class_name": class_name}
+    code, data = req("POST", "/auth/student-login", credentials)
+    if code == 401:
+        req("POST", "/users", {"username": f"edge_{name}", "name": name, "class_name": class_name}, token=teacher)
+        code, data = req("POST", "/auth/student-login", {**credentials, "password": "123456"})
+        if code == 200 and data.get("password_change_token"):
+            code, data = req("POST", "/auth/student-password", {"new_password": credentials["password"]},
+                             token=data["password_change_token"])
+    return data.get("access_token") if code == 200 else None
 
 
 def check(name, condition, detail=""):

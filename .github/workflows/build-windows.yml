@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -27,91 +31,108 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build frontend
+      - name: Read release version
+        id: release
+        shell: pwsh
         run: |
-          cd frontend
-          npm install
+          $launcher = Get-Content packaging/launcher.py -Raw
+          $installer = Get-Content packaging/installer.iss -Raw
+          if ($launcher -notmatch '(?m)^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"') {
+            throw "APP_VERSION is missing from packaging/launcher.py"
+          }
+          $version = $Matches[1]
+          if ($installer -notmatch ('(?m)^#define MyAppVersion "' + [regex]::Escape($version) + '"')) {
+            throw "The installer and launcher versions must match"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $tag = git ls-remote origin "refs/tags/v$version" "refs/tags/v$version^{}"
+          if ($LASTEXITCODE -ne 0) { throw "Could not check release tag v$version" }
+          $commit = ($tag | Select-Object -Last 1) -split '\s+' | Select-Object -First 1
+          "publish=$(-not $commit -or $commit -eq $env:GITHUB_SHA)".ToLowerInvariant() >> $env:GITHUB_OUTPUT
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
           npm run build
 
       - name: Install dependencies
         run: |
-          pip install -r backend/requirements.txt
-          pip install pyinstaller==6.11.1
+          python -m pip install -r backend/requirements.txt
+          python -m pip install pyinstaller==6.11.1
 
       - name: PyInstaller build
         run: pyinstaller packaging/exam_system.spec --noconfirm --clean
 
-      - name: Create zip
+      - name: Package portable ZIP and Windows installer
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          Copy-Item packaging\启动考试系统.bat dist\ExamSystem\启动考试系统.bat -Force
-          Compress-Archive -Path "dist\ExamSystem\*" -DestinationPath "release\ExamSystem.zip" -Force
+          Copy-Item "packaging/启动考试系统.bat" "dist/ExamSystem/启动考试系统.bat" -Force
+          Compress-Archive -Path "dist/ExamSystem/*" -DestinationPath "release/ExamSystem.zip" -Force
+          $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $compiler) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed" }
+            $compiler = Get-Command ISCC.exe -ErrorAction Stop
+          }
+          & $compiler.Source packaging/installer.iss
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path release/ExamSystem-Setup.exe)) {
+            throw "Windows installer was not generated"
+          }
+
+      - name: Smoke test the installed EXE
         shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "ExamSystem-smoke"
+          $setup = Start-Process release/ExamSystem-Setup.exe -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ('/DIR="{0}"' -f $installDir)
+          ) -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw "Installer exited with code $($setup.ExitCode)" }
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP "ExamSystem-smoke-data"
+          $port = 18765
+          $server = Start-Process (Join-Path $installDir "ExamSystem.exe") -ArgumentList "--serve $port" -PassThru
+          try {
+            $healthy = $false
+            for ($attempt = 0; $attempt -lt 45 -and -not $server.HasExited; $attempt++) {
+              try {
+                $health = Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 2
+                $login = Invoke-WebRequest "http://127.0.0.1:$port/login" -TimeoutSec 2
+                $healthy = $health.status -eq "ok" -and $login.StatusCode -eq 200
+                if ($healthy) { break }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if (-not $healthy) { throw "Installed EXE did not serve the API and login page" }
+          } finally {
+            Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+            $log = Join-Path $env:APPDATA "微机教室考试系统/launcher.log"
+            if (-not $healthy -and (Test-Path $log)) { Get-Content $log }
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ExamSystem-Windows
-          path: |
-            dist/ExamSystem/
-            release/ExamSystem.zip
+          path: release/
+          if-no-files-found: error
           retention-days: 30
 
       - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main' && steps.release.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.12
-          name: 微机教室考试系统 v1.2.12
+          tag_name: v${{ steps.release.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: 微机教室考试系统 v${{ steps.release.outputs.version }}
           body: |
-            ## 下载说明
+            - **ExamSystem-Setup.exe**：Windows 安装程序。
+            - **ExamSystem.zip**：便携版。解压整个压缩包后运行 ExamSystem.exe。
 
-            解压 **ExamSystem.zip** 到 Windows 教师机，双击 **ExamSystem.exe** 即可启动。
-
-            程序会自动选择空闲端口（优先 **18765**），放行防火墙，并自动打开浏览器。
-
-            若启动失败，日志里有 `No time zone found with key Asia/Shanghai`，请改用本压缩包。旧版在精简版 Windows 上会因为没有时区数据直接退出。
-
-            若手里的程序仍停在「已等待 0s / 75s」，同样请改用本压缩包，旧 exe 无法从这个画面继续。
-
-            ### v1.2.12
-            - 查看成绩点击表头即可排序
-            - 打字正确率按已经打的字数计算，未打完的后半段不再拉低正确率
-            - 教师可新建班级、批量导入学生，导入的学生只对本教师可见；管理员仍可管理全部账号
-            - 教师可导出数据包，到另一间教室的教师机导入即可同步学生、班级、考试和打字文章
-
-            ### v1.2.11
-            - 修复精简版 Windows 上服务起不来：日志反复出现 `No time zone found with key Asia/Shanghai`
-            - 安装包自带 tzdata 时区数据；数据仍然缺失时按 UTC+8 显示，最近活跃、心跳和导出时间不受影响
-
-            ### v1.2.10
-            - 修复双击 exe 后启动窗口停在「已等待 0s / 75s」
-            - 启动倒计时改由主线程刷新，服务就绪后会自动打开浏览器
-            - 健康检查直连本机，不受系统代理影响
-
-            ### v1.2.9
-            - 课堂 5 分钟打字测试可导出全班成绩（含未提交）
-            - 打字统计导出包含成绩汇总和打字明细
-
-            ### v1.2.8
-            - 打字对照文章禁止选中、复制和粘贴到输入框
-            - 修复考试中滚动鼠标滚轮会立刻提交试卷
-            - 最近活跃和心跳时间按本地时区显示
-
-            ### v1.2.7（启动加速）
-            - 修复占用端口时健康检查长时间卡住导致「启动不动」
-            - 冷启动数据库种子使用预计算密码哈希，显著加快首次就绪
-            - 启动界面显示等待进度，防火墙放行与服务启动并行
-
-            ### v1.2.6（大规模学生测试）
-            - 学生无需账号：登录页输入姓名即可进入
-            - 四个教师账号：teacher1~teacher4 / teacher123
-            - 教师控制台实时显示在线学生，并可发布考试 / 发起打字测试
-            - 登录页去除所有账号提示信息
-
-            ### 登录方式
-            | 角色 | 方式 |
-            |------|------|
-            | 学生 | 输入姓名 |
-            | 教师 | teacher1~teacher4 / teacher123 |
-          files: release/ExamSystem.zip
+            本版支持管理员管理、分配和删除班级，学生使用姓名和密码登录，新增账号自动用姓名生成用户名。首次登录或教师重置密码后，学生须先修改初始密码。
+          files: |
+            release/ExamSystem-Setup.exe
+            release/ExamSystem.zip
+          fail_on_unmatched_files: true
           make_latest: true

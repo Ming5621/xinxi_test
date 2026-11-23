@@ -33,9 +33,15 @@ export const useAuthStore = defineStore('auth', () => {
     return applySession(res)
   }
 
-  async function studentLogin(name, className = '课堂') {
-    const res = await authApi.studentLogin({ name, class_name: className })
-    return applySession(res)
+  async function studentLogin(username, password, className) {
+    const res = await authApi.studentLogin({ username, password, class_name: className })
+    if (res.password_change_token) return res
+    applySession(res)
+    return res
+  }
+
+  async function changeStudentPassword(token, newPassword) {
+    return applySession(await authApi.changeStudentPassword(token, newPassword))
   }
 
   function logout() {
@@ -51,5 +57,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(user.value))
   }
 
-  return { token, user, isLoggedIn, isTeacher, isAdmin, isStudent, login, studentLogin, logout, patchUser }
+  return { token, user, isLoggedIn, isTeacher, isAdmin, isStudent, login, studentLogin, changeStudentPassword, logout, patchUser }
 })

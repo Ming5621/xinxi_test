@@ -7,7 +7,7 @@
     </div>
 
     <div class="login-container">
-      <div class="login-brand">
+      <div v-if="!passwordChangeToken" class="login-brand">
         <div class="brand-icon">
           <el-icon :size="48"><Reading /></el-icon>
         </div>
@@ -29,28 +29,59 @@
         </div>
       </div>
 
-      <div class="login-card">
+      <div v-if="passwordChangeToken" class="login-card">
+        <h2>修改初始密码</h2>
+        <p class="login-subtitle">设置至少 8 个字符的新密码后即可进入系统。</p>
+        <el-form ref="passwordFormRef" :model="passwordForm" :rules="passwordRules" @submit.prevent="handlePasswordChange">
+          <el-form-item prop="newPassword">
+            <el-input v-model="passwordForm.newPassword" type="password" placeholder="新密码" autocomplete="new-password" size="large" show-password />
+          </el-form-item>
+          <el-form-item prop="confirmation">
+            <el-input v-model="passwordForm.confirmation" type="password" placeholder="确认新密码" autocomplete="new-password" size="large" show-password />
+          </el-form-item>
+          <el-button type="primary" native-type="submit" :loading="loading" class="login-btn">保存并进入</el-button>
+          <el-button text :disabled="loading" class="back-to-login" @click="returnToLogin">返回登录</el-button>
+        </el-form>
+      </div>
+
+      <div v-else class="login-card">
         <h2>开始使用</h2>
-        <p class="login-subtitle">{{ mode === 'student' ? '输入姓名即可进入' : '教师登录' }}</p>
+        <p class="login-subtitle">{{ mode === 'student' ? '使用本人姓名和密码登录' : '教师登录' }}</p>
 
         <div class="mode-switch">
-          <button type="button" class="mode-btn" :class="{ active: mode === 'student' }" @click="mode = 'student'">学生</button>
-          <button type="button" class="mode-btn" :class="{ active: mode === 'teacher' }" @click="mode = 'teacher'">教师</button>
+          <button type="button" class="mode-btn" :class="{ active: mode === 'student' }" :disabled="loading" @click="mode = 'student'">学生</button>
+          <button type="button" class="mode-btn" :class="{ active: mode === 'teacher' }" :disabled="loading" @click="mode = 'teacher'">教师</button>
         </div>
 
         <el-form v-if="mode === 'student'" ref="studentFormRef" :model="studentForm" :rules="studentRules" @submit.prevent="handleStudentLogin">
-          <el-form-item prop="name">
+          <el-form-item prop="username">
             <el-input
-              v-model="studentForm.name"
-              placeholder="请输入姓名"
+              v-model="studentForm.username"
+              placeholder="用户名（本人姓名）"
+              autocomplete="username"
               size="large"
               :prefix-icon="User"
               maxlength="40"
-              @keyup.enter="handleStudentLogin"
+            />
+          </el-form-item>
+          <el-form-item prop="class_name">
+            <el-select v-model="studentForm.class_name" placeholder="选择班级" size="large" filterable style="width: 100%">
+              <el-option v-for="name in classes" :key="name" :label="name" :value="name" />
+            </el-select>
+          </el-form-item>
+          <el-form-item prop="password">
+            <el-input
+              v-model="studentForm.password"
+              type="password"
+              placeholder="密码"
+              autocomplete="current-password"
+              size="large"
+              :prefix-icon="Lock"
+              show-password
             />
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" size="large" :loading="loading" class="login-btn" @click="handleStudentLogin">
+            <el-button type="primary" size="large" native-type="submit" :loading="loading" class="login-btn">
               进入系统
             </el-button>
           </el-form-item>
@@ -90,11 +121,12 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { authApi } from '@/api'
 import CopyrightFooter from '@/components/CopyrightFooter.vue'
 
 const router = useRouter()
@@ -102,13 +134,29 @@ const auth = useAuthStore()
 const mode = ref('student')
 const studentFormRef = ref()
 const teacherFormRef = ref()
+const passwordFormRef = ref()
+const passwordChangeToken = ref('')
 const loading = ref(false)
 
-const studentForm = reactive({ name: '' })
+const classes = ref([])
+const studentForm = reactive({ username: '', class_name: '', password: '' })
 const teacherForm = reactive({ username: '', password: '' })
+const passwordForm = reactive({ newPassword: '', confirmation: '' })
 
 const studentRules = {
-  name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入本人姓名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  class_name: [{ required: true, message: '请选择班级', trigger: 'change' }],
+}
+const passwordRules = {
+  newPassword: [{ required: true, min: 8, message: '新密码至少 8 个字符', trigger: 'blur' }],
+  confirmation: [{
+    validator: (_, value, callback) => {
+      if (!value || value !== passwordForm.newPassword) callback(new Error('两次输入的密码不一致'))
+      else callback()
+    },
+    trigger: 'blur',
+  }],
 }
 const teacherRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -122,12 +170,41 @@ function homePath(role) {
 }
 
 async function handleStudentLogin() {
-  await studentFormRef.value.validate()
+  if (loading.value || !await studentFormRef.value.validate().catch(() => false)) return
   loading.value = true
   try {
-    const user = await auth.studentLogin(studentForm.name.trim())
-    ElMessage.success(`欢迎，${user.name}！`)
-    router.push(homePath(user.role))
+    const result = await auth.studentLogin(studentForm.username.trim(), studentForm.password, studentForm.class_name)
+    studentForm.password = ''
+    if (result.password_change_token) {
+      passwordChangeToken.value = result.password_change_token
+      return
+    }
+    ElMessage.success(`欢迎，${result.user.name}！`)
+    router.push(homePath(result.user.role))
+  } catch {
+    studentForm.password = ''
+  } finally {
+    loading.value = false
+  }
+}
+
+function returnToLogin() {
+  passwordChangeToken.value = ''
+  passwordForm.newPassword = ''
+  passwordForm.confirmation = ''
+}
+
+async function handlePasswordChange() {
+  if (loading.value || !await passwordFormRef.value.validate().catch(() => false)) return
+  loading.value = true
+  try {
+    await auth.changeStudentPassword(passwordChangeToken.value, passwordForm.newPassword)
+    passwordForm.newPassword = ''
+    passwordForm.confirmation = ''
+    ElMessage.success('密码已更新')
+    router.replace('/student')
+  } catch (error) {
+    if (error.response?.status === 401) returnToLogin()
   } finally {
     loading.value = false
   }
@@ -144,6 +221,13 @@ async function handleTeacherLogin() {
     loading.value = false
   }
 }
+
+onMounted(async () => {
+  const result = await authApi.studentClasses()
+  classes.value = result.classes
+  if (classes.value.includes('课堂')) studentForm.class_name = '课堂'
+  else if (classes.value.length === 1) studentForm.class_name = classes.value[0]
+})
 </script>
 
 <style scoped>
@@ -278,6 +362,11 @@ async function handleTeacherLogin() {
   height: 44px;
   font-size: 16px;
   border-radius: 10px;
+}
+
+.back-to-login {
+  display: block;
+  margin: 10px auto 0;
 }
 
 .login-footer {

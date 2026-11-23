@@ -12,6 +12,7 @@ STUDENT_HEADERS = {
     "name": {"姓名", "name", "名字"},
     "class_name": {"班级", "class_name", "class", "班"},
     "password": {"密码", "password", "pwd"},
+    "teacher_username": {"教师用户名", "教师账号", "绑定教师", "teacher_username"},
 }
 
 QUESTION_CSV_HEADERS = {
@@ -43,8 +44,8 @@ def _map_headers(row_headers: list[str], mapping: dict) -> dict[str, int]:
 
 def parse_students_text(text: str, default_password: str = "123456") -> tuple[list[dict], list[str]]:
     """解析学生批量导入文本，支持 CSV/TSV"""
-    text = text.strip()
-    if not text:
+    text = text.lstrip("\ufeff")
+    if not text.strip():
         return [], ["导入内容为空"]
 
     errors: list[str] = []
@@ -52,17 +53,19 @@ def parse_students_text(text: str, default_password: str = "123456") -> tuple[li
     seen_usernames: set[str] = set()
 
     # 尝试 CSV 解析
-    delimiter = "\t" if "\t" in text.split("\n")[0] else ","
-    reader = csv.reader(io.StringIO(text))
-    rows = list(reader)
+    first_line = next(line for line in text.splitlines() if line.strip())
+    delimiter = "\t" if "\t" in first_line else ","
+    rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+    while rows and not any(cell.strip() for cell in rows[0]):
+        rows.pop(0)
     if not rows:
         return [], ["无法解析内容"]
 
     header_map = _map_headers(rows[0], STUDENT_HEADERS)
-    start_idx = 1 if len(header_map) >= 2 else 0
+    start_idx = 1 if "name" in header_map else 0
 
     if start_idx == 0:
-        header_map = {"username": 0, "name": 1, "class_name": 2, "password": 3}
+        header_map = {"username": 0, "name": 1, "class_name": 2, "password": 3, "teacher_username": 4}
 
     for line_no, row in enumerate(rows[start_idx:], start=start_idx + 1):
         if not row or all(not cell.strip() for cell in row):
@@ -74,28 +77,29 @@ def parse_students_text(text: str, default_password: str = "123456") -> tuple[li
             class_name = ""
             if header_map.get("class_name") is not None and header_map["class_name"] < len(row):
                 class_name = row[header_map["class_name"]].strip()
-            password = default_password
+            teacher_col = header_map.get("teacher_username")
+            teacher_username = row[teacher_col].strip() if teacher_col is not None and teacher_col < len(row) else ""
+            password = ""
             if header_map.get("password") is not None and header_map["password"] < len(row):
-                pwd = row[header_map["password"]].strip()
-                if pwd:
-                    password = pwd
+                password = row[header_map["password"]].strip()
 
-            if not username:
-                errors.append(f"第 {line_no} 行：用户名不能为空")
-                continue
             if not name:
                 errors.append(f"第 {line_no} 行：姓名不能为空")
                 continue
-            if username in seen_usernames:
+            if username and username in seen_usernames:
                 errors.append(f"第 {line_no} 行：用户名 {username} 重复")
                 continue
 
-            seen_usernames.add(username)
+            if username:
+                seen_usernames.add(username)
             students.append({
                 "username": username,
                 "name": name,
                 "class_name": class_name,
-                "password": password,
+                "password": password or default_password,
+                "explicit_password": bool(password),
+                "teacher_username": teacher_username,
+                "line_no": line_no,
             })
         except Exception as e:
             errors.append(f"第 {line_no} 行：解析失败 - {e}")

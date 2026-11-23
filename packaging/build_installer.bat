@@ -20,5 +20,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo 安装程序已生成: release\微机教室考试系统_Setup.exe
+echo 安装程序已生成: release\ExamSystem-Setup.exe
 pause

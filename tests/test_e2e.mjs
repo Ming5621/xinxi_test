@@ -23,14 +23,40 @@ async function teacherLogin(page, username, password) {
 }
 
 async function studentLogin(page, name) {
+  const response = await page.request.post(`${BASE}/api/auth/login`, {
+    data: { username: 'teacher1', password: 'teacher123' },
+  })
+  const { access_token: token } = await response.json()
+  const headers = { Authorization: `Bearer ${token}` }
+  const accounts = await page.request.get(`${BASE}/api/users?role=student&class_name=${encodeURIComponent('课堂')}`, { headers })
+  const account = (await accounts.json()).find((user) => user.name === name)
+  const prepared = account
+    ? await page.request.put(`${BASE}/api/users/${account.id}`, { headers, data: { password: '123456' } })
+    : await page.request.post(`${BASE}/api/users`, {
+      headers, data: { username: `e2e_${name}`, name, class_name: '课堂', password: '123456' },
+    })
+  if (!prepared.ok()) throw new Error(`准备学生账号失败：${await prepared.text()}`)
+
   await page.goto(`${BASE}/login`)
   await page.evaluate(() => localStorage.clear())
   await page.reload()
   await page.waitForLoadState('networkidle')
-  // 默认即为学生模式
-  await page.locator('input').first().fill(name)
+  await page.getByPlaceholder('用户名（本人姓名）').fill(name)
+  await page.getByPlaceholder('密码', { exact: true }).fill('123456')
   await page.locator('button').filter({ hasText: '进入系统' }).click()
-  await page.waitForTimeout(1500)
+  await page.getByRole('heading', { name: '修改初始密码' }).waitFor()
+  check('改密前没有完整登录会话', await page.evaluate(() => localStorage.getItem('token') === null))
+  await page.getByPlaceholder('新密码', { exact: true }).fill('e2e-student-new-pass')
+  await page.getByPlaceholder('确认新密码').fill('e2e-student-new-pass')
+  await page.getByRole('button', { name: '保存并进入' }).click()
+  await page.waitForURL('**/student')
+}
+
+async function checkTeacherFooter(page, name) {
+  const logout = await page.locator('.sidebar-footer').getByRole('button', { name: '退出登录' }).boundingBox()
+  check(`${name}在可视区内显示教师信息和退出入口`,
+    !!logout && logout.y >= 0 && logout.y + logout.height <= page.viewportSize().height
+      && await page.locator('.sidebar-footer .user-name').isVisible())
 }
 
 console.log('='.repeat(50))
@@ -54,6 +80,7 @@ check('默认学生模式', await page.locator('button.mode-btn.active').textCon
 // 2. 教师登录
 await teacherLogin(page, 'teacher1', 'teacher123')
 check('教师跳转控制台', page.url().includes('/teacher'))
+await checkTeacherFooter(page, '控制台')
 
 // 控制台应有在线学生区
 check('控制台含在线学生', await page.locator('text=当前在线学生').count() >= 1)
@@ -63,11 +90,13 @@ check('控制台含发任务', await page.locator('text=发任务').count() >= 1
 await page.goto(`${BASE}/teacher/students`)
 await page.waitForTimeout(800)
 check('学生动态页加载', await page.locator('h1').textContent().then(t => t.includes('学生')))
+await checkTeacherFooter(page, '学生动态')
 
 // 4. 考试管理
 await page.goto(`${BASE}/teacher/exams`)
 await page.waitForTimeout(800)
 check('考试管理页加载', await page.locator('h1').textContent().then(t => t.includes('考试管理')))
+await checkTeacherFooter(page, '考试管理')
 
 // 5. 创建考试页
 await page.goto(`${BASE}/teacher/exams/create`)
@@ -81,6 +110,8 @@ check('添加选择题', await page.locator('.question-editor').count() === 1)
 // 添加打字题
 await page.locator('button:has-text("添加打字题")').click()
 check('添加打字题', await page.locator('.question-editor').count() === 2)
+await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+await checkTeacherFooter(page, '创建考试')
 
 // 6. 批量导入按钮
 await page.goto(`${BASE}/teacher/students`)
@@ -89,9 +120,13 @@ await page.locator('button:has-text("批量导入")').click()
 check('批量导入对话框', await page.locator('.el-dialog').isVisible())
 
 // 7. 打字统计与文章导入
+await page.goto(`${BASE}/teacher/typing/class-test`)
+await page.locator('.sidebar-footer').waitFor()
+await checkTeacherFooter(page, '课堂打字测试')
 await page.goto(`${BASE}/teacher/typing`)
 await page.waitForTimeout(800)
 check('教师打字统计页', await page.locator('h1').textContent().then(t => t.includes('打字')))
+await checkTeacherFooter(page, '打字统计')
 check('导入文章按钮', await page.locator('button:has-text("导入文章")').count() >= 1)
 
 const longBody = '信息技术课程帮助我们学习与交流。'.repeat(40)

@@ -35,7 +35,7 @@ def main():
     print(f"  学生机访问: http://{ip}:{port}")
     print(f"\n登录说明:")
     print(f"  教师: teacher1~teacher4 / teacher123")
-    print(f"  学生: 登录页输入姓名即可（无需预设账号）")
+    print("  学生: 选择班级，使用姓名和密码登录")
     print("=" * 50)
 
     import uvicorn

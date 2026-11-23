@@ -7,12 +7,16 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from .auth import get_password_hash
+from .auth import DEFAULT_STUDENT_PASSWORD, get_password_hash
 from .models import Exam, Question, QuestionType, TypingDifficulty, TypingText, User, UserRole
 from .permissions import (
     active_student_name_taken,
     apply_student_scope,
-    claim_class_for_teacher,
+    list_all_classes,
+    remember_class,
+    resolve_student_class,
+    student_in_scope,
+    teacher_can_manage_class,
 )
 from .timeutil import serialize_utc_datetime, utc_now
 
@@ -25,7 +29,7 @@ def build_teacher_pack(db: Session, current_user: User) -> dict:
     if current_user.role == UserRole.admin:
         texts = db.query(TypingText).order_by(TypingText.id).all()
         exams = db.query(Exam).options(joinedload(Exam.questions)).order_by(Exam.id).all()
-        classes = sorted({s.class_name for s in students if s.class_name})
+        classes = list_all_classes(db)
     else:
         texts = (
             db.query(TypingText)
@@ -99,8 +103,13 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
         name = str(raw_name or "").strip()
         if not name:
             continue
-        if current_user.role == UserRole.teacher:
-            claim_class_for_teacher(db, current_user, name)
+        try:
+            resolve_student_class(current_user, name)
+        except HTTPException as exc:
+            errors.append(f"班级 {name}：{exc.detail}")
+            continue
+        if current_user.role == UserRole.admin:
+            remember_class(db, name)
         class_count += 1
 
     for item in payload.get("students") or []:
@@ -112,44 +121,56 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
         if not username or not name:
             errors.append("跳过缺少用户名或姓名的学生")
             continue
-        if current_user.role == UserRole.teacher:
-            class_name = claim_class_for_teacher(db, current_user, class_name)
-        elif not class_name:
-            class_name = "课堂"
+        try:
+            class_name = resolve_student_class(current_user, class_name)
+        except HTTPException as exc:
+            errors.append(f"学生 {username}：{exc.detail}")
+            continue
 
         existing = db.query(User).filter(User.username == username).first()
+        is_active = bool(item.get("is_active", existing.is_active if existing else True))
         if existing:
             if existing.role != UserRole.student:
                 errors.append(f"用户名 {username} 已被其他角色占用，已跳过")
                 continue
-            if current_user.role == UserRole.teacher:
-                if existing.managed_by_teacher_id not in (None, current_user.id):
-                    errors.append(f"学生 {username} 已绑定其他教师，已跳过")
-                    continue
-                existing.managed_by_teacher_id = current_user.id
+            if current_user.role == UserRole.teacher and not student_in_scope(current_user, existing):
+                errors.append(f"无权管理学生 {username}，已跳过")
+                continue
+            if is_active and active_student_name_taken(db, name, class_name, existing.id):
+                errors.append(f"班级 {class_name} 已有同名学生 {name}，已跳过")
+                continue
+            if current_user.role == UserRole.admin:
+                remember_class(db, class_name)
+                if existing.managed_by_teacher_id is not None and class_name != existing.class_name:
+                    if not teacher_can_manage_class(db.get(User, existing.managed_by_teacher_id), class_name):
+                        existing.managed_by_teacher_id = None
             existing.name = name
             existing.class_name = class_name
-            if "is_active" in item:
-                existing.is_active = bool(item.get("is_active"))
+            existing.is_active = is_active
+            db.flush()
             student_updated += 1
             continue
 
-        if active_student_name_taken(db, name, class_name):
+        if is_active and active_student_name_taken(db, name, class_name):
             errors.append(f"班级 {class_name} 已有同名学生 {name}，已跳过")
             continue
 
+        if current_user.role == UserRole.admin:
+            remember_class(db, class_name)
         db.add(
             User(
                 username=username,
-                password_hash=get_password_hash("123456"),
+                password_hash=get_password_hash(DEFAULT_STUDENT_PASSWORD),
+                must_change_password=True,
                 name=name,
                 role=UserRole.student,
                 class_name=class_name,
                 assigned_classes=[],
                 managed_by_teacher_id=owner_id,
-                is_active=bool(item.get("is_active", True)),
+                is_active=is_active,
             )
         )
+        db.flush()
         student_created += 1
 
     for item in payload.get("typing_texts") or []:

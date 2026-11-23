@@ -2,7 +2,7 @@
 ; 需先运行 build_windows.bat，再安装 Inno Setup 6 后执行本脚本
 
 #define MyAppName "微机教室考试系统"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.13"
 #define MyAppPublisher "柴延明"
 #define MyAppExeName "ExamSystem.exe"
 
@@ -15,7 +15,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\release
-OutputBaseFilename=微机教室考试系统_Setup
+OutputBaseFilename=ExamSystem-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -41,15 +41,3 @@ Filename: "{app}\{#MyAppExeName}"; Description: "立即启动 {#MyAppName}"; Fla
 
 [UninstallDelete]
 Type: dirifempty; Name: "{userappdata}\微机教室考试系统"
-
-[Code]
-function InitializeSetup(): Boolean;
-begin
-  if not FileExists(ExpandConstant('{src}\..\dist\ExamSystem\ExamSystem.exe')) then
-  begin
-    MsgBox('请先运行 build_windows.bat 生成程序文件！', mbError, MB_OK);
-    Result := False;
-  end
-  else
-    Result := True;
-end;

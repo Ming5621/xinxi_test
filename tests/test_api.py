@@ -5,6 +5,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from uuid import uuid4
 
 BASE = "http://localhost:8000/api"
 passed = 0
@@ -50,9 +51,23 @@ def login(username, password):
     return None, None
 
 
+TEST_STUDENT_PASSWORD = "student-test-pass"
+
+
+def student_credentials(name, password, class_name="课堂"):
+    return req("POST", "/auth/student-login", {
+        "username": name, "password": password, "class_name": class_name,
+    })
+
+
 def student_login(name, class_name="课堂"):
-    code, data = req("POST", "/auth/student-login", {"name": name, "class_name": class_name})
-    if code == 200:
+    code, data = student_credentials(name, TEST_STUDENT_PASSWORD, class_name)
+    if code == 401:
+        code, data = student_credentials(name, "123456", class_name)
+        if code == 200 and data.get("password_change_token"):
+            code, data = req("POST", "/auth/student-password", {"new_password": TEST_STUDENT_PASSWORD},
+                             token=data["password_change_token"])
+    if code == 200 and data.get("access_token"):
         return data["access_token"], data["user"]
     return None, None
 
@@ -78,12 +93,30 @@ check("健康检查", code == 200 and data.get("status") == "ok", str(data))
 
 # 2. 登录
 teacher_token, teacher = login("teacher1", "teacher123")
+_, existing = req("GET", "/users?role=student", token=teacher_token)
+for index, name in enumerate(["测试生甲", "测试生乙", "测试生丙", "测试生丁", "测试生戊"]):
+    account = next((row for row in existing if row["name"] == name and row["class_name"] == "课堂"), None)
+    if account:
+        req("PUT", f"/users/{account['id']}", {"password": "123456"}, token=teacher_token)
+    else:
+        req("POST", "/users", {"username": f"api_login_fixture_{index}", "name": name, "class_name": "课堂"},
+            token=teacher_token)
+
+code, challenge = student_credentials("测试生甲", "123456")
+check("首次学生登录只发放改密凭证", code == 200 and bool(challenge.get("password_change_token"))
+      and "access_token" not in challenge, str(challenge))
+if challenge.get("password_change_token"):
+    pending = challenge["password_change_token"]
+    code, _ = req("GET", "/auth/me", token=pending)
+    check("改密凭证不能访问学生业务接口", code == 401)
+    code, _ = req("POST", "/auth/student-password", {"new_password": "short"}, token=pending)
+    check("拒绝太短的新密码", code == 400)
 student_token, student = student_login("测试生甲")
 check("教师登录", teacher_token and teacher["role"] == "teacher")
 check("学生姓名登录", student_token and student["role"] == "student" and student["name"] == "测试生甲")
 check("学生默认班级为课堂", student and student.get("class_name") == "课堂")
 
-# 同名再次登录应复用账号
+# 改密后再次登录沿用原有账号
 token2, student2_same = student_login("测试生甲")
 check("同名学生复用账号", token2 and student2_same["id"] == student["id"])
 
@@ -93,8 +126,36 @@ check("错误密码拒绝", code == 401)
 code, detail = req("POST", "/auth/login", {"username": student["username"], "password": "x"})
 check("学生密码登录被拒绝", code == 400, str(detail))
 
-code, _ = req("POST", "/auth/student-login", {"name": "  "})
+code, _ = student_credentials("  ", "123456")
 check("空姓名拒绝", code == 400)
+
+code, _ = student_credentials("不存在的测试生", "123456")
+check("未建档学生不能自动注册", code == 401)
+code, _ = student_credentials("测试生甲", "123456")
+check("改密后初始密码失效", code == 401)
+if challenge.get("password_change_token"):
+    code, _ = req("POST", "/auth/student-password", {"new_password": "replayed-pass"},
+                  token=challenge["password_change_token"])
+    check("改密凭证只能使用一次", code == 401)
+
+code, _ = req("PUT", f"/users/{student['id']}", {"password": "temporary-pass"}, token=teacher_token)
+check("教师可以重置本班学生密码", code == 200)
+code, _ = req("GET", "/auth/me", token=student_token)
+check("重置会撤销学生的旧会话", code == 401)
+code, _ = student_credentials("测试生甲", TEST_STUDENT_PASSWORD)
+check("重置后旧密码失效", code == 401)
+code, reset_challenge = student_credentials("测试生甲", "temporary-pass")
+check("重置后学生再次进入强制改密", code == 200 and bool(reset_challenge.get("password_change_token")))
+if reset_challenge.get("password_change_token"):
+    reset_token = reset_challenge["password_change_token"]
+    code, _ = req("POST", "/auth/student-password", {"new_password": "temporary-pass"}, token=reset_token)
+    check("重置后不可沿用临时密码", code == 400)
+    code, reset_result = req(
+        "POST", "/auth/student-password", {"new_password": TEST_STUDENT_PASSWORD}, token=reset_token
+    )
+    check("学生改密后恢复完整会话", code == 200 and reset_result["user"]["id"] == student["id"])
+    student_token = reset_result.get("access_token")
+
 
 # 四个教师账号均可登录
 for i in range(1, 5):
@@ -225,7 +286,7 @@ if acct_student_id:
     tok, usr = student_login("账号测生乙")
     check("改名后姓名登录命中原账号", bool(tok) and usr and usr.get("id") == acct_student_id, str(usr))
     tok, usr = student_login("账号测生")
-    check("旧姓名不再指向原账号", bool(tok) and usr and usr.get("id") != acct_student_id, str(usr))
+    check("旧姓名被拒绝且不会创建账号", tok is None and usr is None)
 
 if acct_teacher_id:
     code, updated = req("PUT", f"/users/{acct_teacher_id}", {
@@ -317,34 +378,109 @@ purge_test_accounts()
 code, classes = req("GET", "/classes", token=teacher_token)
 check("教师获取班级列表", code == 200 and "classes" in classes)
 
-code, created_class_student = req("POST", "/users", {
+class_name = f"测试班{uuid4().hex[:8]}"
+code, _ = req("POST", "/classes", {"name": class_name}, token=teacher_token)
+check("教师不能创建班级", code == 403)
+new_student_data = {
     "username": "test_cross_class",
     "name": "跨班学生",
     "password": "123456",
     "role": "student",
-    "class_name": "微机2班",
-}, token=teacher_token)
+    "class_name": class_name,
+}
+code, _ = req("POST", "/users", new_student_data, token=teacher_token)
+check("教师不能通过添加学生认领班级", code == 403)
+
+code, _ = req("POST", "/classes", {"name": class_name}, token=admin_token)
+check("管理员可以创建未分配教师的班级", code == 200)
+code, admin_classes = req("GET", "/classes", token=admin_token)
+check("空班级出现在管理列表", code == 200 and class_name in admin_classes["classes"])
+
+class_binding = {"original_name": class_name, "name": class_name, "teacher_ids": [teacher["id"]]}
+code, _ = req("PUT", "/classes", class_binding, token=teacher_token)
+check("教师不能编辑班级绑定", code == 403)
+code, _ = req("PUT", "/classes", class_binding, token=admin_token)
+check("管理员可以将班级分配给教师", code == 200)
+
+code, created_class_student = req("POST", "/users", new_student_data, token=teacher_token)
 check(
-    "教师可新建班级并导入学生",
-    code == 200 and created_class_student.get("class_name") == "微机2班",
+    "教师可添加已分配班级的学生",
+    code == 200 and created_class_student.get("class_name") == class_name,
     str(created_class_student),
 )
 code, classes_after = req("GET", "/classes", token=teacher_token)
-check(
-    "新建班级出现在教师班级列表",
-    code == 200 and "微机2班" in (classes_after.get("classes") or []),
-    str(classes_after),
-)
+check("教师可查看新分配的班级", code == 200 and class_name in classes_after["classes"])
+
+old_class_name = class_name
+class_name = f"{class_name}改名"
+code, _ = req("PUT", "/classes", {**class_binding, "name": class_name}, token=admin_token)
+check("管理员可修改班级名称", code == 200)
+code, classes_after = req("GET", "/classes", token=teacher_token)
+check("改名同步到教师班级", code == 200 and class_name in classes_after["classes"] and old_class_name not in classes_after["classes"])
+token, renamed_class_student = student_login("跨班学生", class_name)
+check("改名后按新班级登录原学生账号", bool(token) and renamed_class_student["id"] == created_class_student.get("id"))
+
+teacher2_token, teacher2 = login("teacher2", "teacher123")
+code, _ = req("PUT", f"/users/{created_class_student.get('id')}", {
+    "managed_by_teacher_id": teacher2["id"],
+}, token=admin_token)
+check("学生只能绑定管理其班级的教师", code == 400)
+code, _ = req("PUT", "/classes", {
+    "original_name": class_name, "name": class_name, "teacher_ids": [teacher["id"], teacher2["id"]],
+}, token=admin_token)
+check("管理员可为班级分配多位教师", code == 200)
+code, _ = req("PUT", f"/users/{created_class_student.get('id')}", {
+    "managed_by_teacher_id": teacher2["id"],
+}, token=teacher_token)
+check("教师不能修改学生绑定教师", code == 403)
+
+code, batch = req("POST", "/import/students", {
+    "text": f"用户名\t姓名\t班级\t教师用户名\ntest_cross_class\t跨班学生\t{class_name}\tteacher2"
+            f"\ntest_acct_batch_student\t批量新学生\t{class_name}\tteacher2"
+            f"\ntest_acct_bad_binding\t无效绑定\t{class_name}\tteacher3",
+    "update_existing": True,
+}, token=admin_token)
+check("管理员批量新增、更新学生并校验教师绑定",
+      code == 200 and batch["success_count"] == 2 and batch["updated_count"] == 1 and batch["fail_count"] == 1, str(batch))
+
+code, students_for_teacher2 = req("GET", "/users?role=student", token=teacher2_token)
+check("批量改绑生效", code == 200 and any(u["id"] == created_class_student.get("id") for u in students_for_teacher2))
+code, _ = req("PUT", f"/users/{created_class_student['id']}", {"password": "other-password"}, token=teacher_token)
+check("教师不能重置绑定给其他教师的学生密码", code == 403)
+
+code, students_for_teacher1 = req("GET", "/users?role=student", token=teacher_token)
+check("原教师失去改绑学生的管理权限",
+      code == 200 and not any(u["id"] == created_class_student.get("id") for u in students_for_teacher1))
+
+code, restored = req("PUT", f"/users/{created_class_student.get('id')}", {
+    "managed_by_teacher_id": teacher["id"],
+}, token=admin_token)
+check("管理员可逐个修改学生绑定教师", code == 200 and restored["managed_by_teacher_id"] == teacher["id"])
+code, _ = req("PUT", "/classes", {
+    "original_name": class_name, "name": class_name, "teacher_ids": [teacher["id"]],
+}, token=admin_token)
+code, teacher2_classes = req("GET", "/classes", token=teacher2_token)
+check("取消班级分配后旧班级不再可见", code == 200 and class_name not in teacher2_classes["classes"])
+code, batch_students = req("GET", "/users?role=student", token=admin_token)
+check("取消班级分配时解除受影响学生的绑定",
+      code == 200 and any(u["username"] == "test_acct_batch_student" and u["managed_by_teacher_id"] is None for u in batch_students))
 
 code, _ = req("GET", "/users?role=teacher", token=teacher_token)
 check("教师无法查看教师列表", code == 403)
 
 # 4. 批量导入
 code, result = req("POST", "/import/students", {
-    "text": "test_import01,导入一,课堂,123456\ntest_import02,导入二,微机2班,",
+    "text": f"test_import01,导入一,课堂,123456\ntest_import02,导入二,{class_name},",
     "default_password": "123456",
 }, token=teacher_token)
 check("批量导入学生", code == 200 and result.get("success_count", 0) >= 1, str(result))
+code, blocked = req("POST", "/import/students", {
+    "text": "test_acct_forbidden,越权导入,教师未分配班,",
+}, token=teacher_token)
+check("教师不能批量导入未分配班级", code == 200 and blocked["success_count"] == 0 and blocked["fail_count"] == 1)
+code, _ = req("POST", "/import/students", {"text": "user,name", "update_existing": True}, token=teacher_token)
+check("教师不能通过学生导入批量更新账号", code == 403)
+
 
 code, parsed = req("POST", "/import/questions/parse", {
     "text": "类型,题目,选项A,选项B,选项C,选项D,答案,分值\nchoice,测试题,A,B,C,D,A,5",
@@ -472,6 +608,31 @@ def multipart_req(path, fields, file_field, filename, content, token, mime="text
             detail = raw
         return e.code, detail
 
+
+code, result = multipart_req(
+    "/import/students/file?update_existing=true",
+    {},
+    "file",
+    "students.csv",
+    f"用户名,姓名,班级,教师用户名\ntest_acct_batch_student,更新文件导入,{class_name},teacher1".encode("gbk"),
+    admin_token,
+    mime="text/csv",
+)
+check("管理员上传学生文件并更新绑定", code == 200 and result.get("updated_count") == 1, str(result))
+code, result = multipart_req(
+    "/import/students/file?update_existing=true",
+    {},
+    "file",
+    "students.csv",
+    "用户名,姓名,教师用户名\ntest_acct_batch_student,解除绑定,未绑定",
+    admin_token,
+    mime="text/csv",
+)
+code, batch_students = req("GET", "/users?role=student", token=admin_token)
+check("文件导入可以解除绑定并保留原班级", code == 200 and result.get("updated_count") == 1 and any(
+    u["username"] == "test_acct_batch_student" and u["managed_by_teacher_id"] is None and u["class_name"] == class_name
+    for u in batch_students
+))
 
 # 9. 打字练习
 code, teacher_texts = req("GET", "/typing/texts", token=teacher_token)
@@ -701,8 +862,11 @@ check(
 code, imported = req("POST", "/import/teacher-pack", {
     "format": "xinxi_teacher_pack",
     "version": 1,
-    "classes": ["同步班"],
-    "students": [{"username": "pack_stu_01", "name": "同步生", "class_name": "同步班", "is_active": True}],
+    "classes": ["课堂", "未分配同步班"],
+    "students": [
+        {"username": "pack_stu_01", "name": "同步生", "class_name": "课堂", "is_active": True},
+        {"username": "pack_stu_02", "name": "越权同步生", "class_name": "未分配同步班", "is_active": True},
+    ],
     "typing_texts": [{"title": "同步练习文", "content": "信息技术改变生活。", "difficulty": "basic", "time_limit": 60}],
     "exams": [{
         "title": "同步测验包",
@@ -722,7 +886,7 @@ code, imported = req("POST", "/import/teacher-pack", {
 }, token=teacher2_token)
 check(
     "另一名教师导入数据包",
-    code == 200 and imported.get("student_created", 0) >= 1 and imported.get("exam_count", 0) >= 1,
+    code == 200 and imported.get("student_created") == 1 and imported.get("exam_count", 0) >= 1 and len(imported["errors"]) == 2,
     str(imported),
 )
 code, t2_after = req("GET", "/presence/students", token=teacher2_token)
@@ -732,7 +896,64 @@ code, t1_after = req("GET", "/presence/students", token=teacher_token)
 t1_after_names = {s.get("username") for s in t1_after} if code == 200 else set()
 check("原教师看不到对方导入的学生", "pack_stu_01" not in t1_after_names, str(t1_after_names))
 
+# 班级删除与默认用户名
+temporary_class = f"待删除/{uuid4().hex[:8]}"
+temporary_name = f"自动用户名{uuid4().hex[:8]}"
+query = urllib.parse.urlencode({"name": temporary_class})
+teacher_name = f"测试教师{uuid4().hex[:8]}"
+code, generated_teacher = req("POST", "/users", {
+    "name": teacher_name, "role": "teacher", "password": "test-teacher-password",
+}, token=admin_token)
+check("新增教师默认使用姓名作为登录用户名",
+      code == 200 and generated_teacher.get("username") == teacher_name
+      and bool(login(teacher_name, "test-teacher-password")[0]))
+code, _ = req("POST", "/classes", {"name": temporary_class, "teacher_ids": [teacher["id"]]}, token=admin_token)
+check("管理员创建待删除班级", code == 200)
+code, default_account = req("POST", "/users", {
+    "name": temporary_name, "class_name": temporary_class,
+}, token=teacher_token)
+check("新增学生省略用户名时默认使用姓名", code == 200 and default_account.get("username") == temporary_name)
+code, duplicate_class_name = req("POST", "/import/students", {
+    "text": f"姓名,班级,密码\n{temporary_name},课堂,",
+}, token=admin_token)
+check("新模板支持不同班级的同名学生", code == 200 and duplicate_class_name.get("success_count") == 1
+      and duplicate_class_name["preview"][0]["username"] == f"{temporary_name}_2")
+code, roster_update = req("POST", "/import/students", {
+    "text": f"姓名,班级,密码\n{temporary_name},{temporary_class},new-temp-pass",
+    "update_existing": True,
+}, token=admin_token)
+check("批量导入可按姓名和班级更新已有学生", code == 200 and roster_update.get("updated_count") == 1)
+code, teacher_texts = req("GET", "/typing/texts", token=teacher_token)
+code, pending_session = req("POST", "/typing/sessions", {
+    "class_name": temporary_class, "text_id": teacher_texts[0]["id"],
+}, token=teacher_token)
+check("待删除班级可创建课堂测试", code == 200)
+code, _ = req("DELETE", f"/classes?{query}", token=teacher_token)
+check("教师无法删除班级", code == 403)
+code, _ = req("DELETE", f"/classes?{query}", token=admin_token)
+check("管理员可删除有学生的班级", code == 200)
+code, public_classes = req("GET", "/auth/student-classes")
+check("被删除班级不再出现在登录列表", code == 200 and temporary_class not in public_classes["classes"])
+code, teacher_classes = req("GET", "/classes", token=teacher_token)
+check("删除班级解除教师分配", code == 200 and temporary_class not in teacher_classes["classes"])
+code, detached_students = req("GET", "/users?role=student", token=admin_token)
+detached_account = next((u for u in detached_students if u["id"] == default_account.get("id")), None)
+check("删除班级保留学生账号并解除绑定", code == 200 and detached_account is not None
+      and detached_account["class_name"] == "" and detached_account["managed_by_teacher_id"] is None)
+code, _ = student_credentials(temporary_name, "new-temp-pass", temporary_class)
+check("原班级删除后学生无法使用该班级登录", code == 401)
+code, retained_session = req("GET", f"/typing/sessions/{pending_session.get('id')}", token=admin_token)
+check("删除班级结束课堂测试并保留历史",
+      code == 200 and retained_session.get("status") == "ended" and retained_session.get("class_name") == temporary_class)
+
 # 清理测试用户
+if generated_teacher.get("id"):
+    req("DELETE", f"/users/{generated_teacher['id']}", token=admin_token)
+for row in detached_students:
+    if row["name"] == temporary_name:
+        req("DELETE", f"/users/{row['id']}", token=admin_token)
+
+purge_test_accounts()
 for token, names in (
     (teacher_token, ["test_student_99", "test_import01", "test_import02", "test_cross_class"]),
     (teacher2_token, ["pack_stu_01"]),
