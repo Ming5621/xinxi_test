@@ -76,7 +76,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed" }
             $compiler = Get-Command ISCC.exe -ErrorAction Stop
           }
-          & $compiler.Source packaging/installer.iss
+          Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_7_1/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile packaging/ChineseSimplified.isl
+          & $compiler.Source /DUseChineseMessages packaging/installer.iss
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path release/ExamSystem-Setup.exe)) {
             throw "Windows installer was not generated"
           }
