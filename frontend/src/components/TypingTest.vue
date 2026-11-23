@@ -66,11 +66,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 
 const props = defineProps({
   referenceText: { type: String, required: true },
+  initialState: { type: Object, default: null },
   mode: { type: String, default: 'free' }, // free | test
   timeLimit: { type: Number, default: 300 },
   skipConfirm: { type: Boolean, default: false },
@@ -82,7 +83,7 @@ const props = defineProps({
   hideControls: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['complete', 'started', 'finished', 'state'])
+const emit = defineEmits(['complete', 'started', 'finished', 'state', 'progress'])
 
 const typedText = ref('')
 const started = ref(false)
@@ -108,12 +109,26 @@ const standards = [
 
 const referenceChars = computed(() => props.referenceText.split(''))
 
-const liveStats = computed(() => calcStats(typedText.value, props.referenceText, getActiveElapsed()))
+const liveStats = computed(() => calcStats(typedText.value, props.referenceText, elapsed.value))
 
-const liveWpm = computed(() => (started.value && !paused.value) ? liveStats.value.wpm : 0)
-const liveAccuracy = computed(() => started.value ? liveStats.value.accuracy : 100)
+const liveWpm = computed(() => finished.value ? (result.value?.wpm ?? 0) : (started.value && !paused.value) ? liveStats.value.wpm : 0)
+const liveAccuracy = computed(() => finished.value ? (result.value?.accuracy ?? 0) : started.value ? liveStats.value.accuracy : 100)
+
+function emitProgress() {
+  emit('progress', {
+    typed_text: typedText.value,
+    started: started.value,
+    finished: finished.value,
+    start_time: startTime.value,
+    paused: paused.value,
+    paused_duration: pausedDuration.value,
+    pause_start: pauseStart.value,
+    result: result.value,
+  })
+}
 
 function emitState() {
+  emitProgress()
   emit('state', {
     started: started.value,
     finished: finished.value,
@@ -194,9 +209,10 @@ function tick() {
 }
 
 async function start() {
+  if (started.value || (props.disableRetry && finished.value)) return
   if (props.mode === 'test' && !props.skipConfirm) {
     const message = props.allowStop
-      ? '5分钟测试开始后可随时停止并提交当前成绩，时间到也会自动结束。确定开始吗？'
+      ? `测试限时 ${props.timeLimit} 秒，可随时停止并提交当前成绩，时间到也会自动结束。确定开始吗？`
       : '测试开始后无法暂停或停止，时间到自动结束。确定开始吗？'
     try {
       await ElMessageBox.confirm(message, '开始测试', {
@@ -209,6 +225,7 @@ async function start() {
     }
   }
 
+  if (started.value) return
   started.value = true
   finished.value = false
   paused.value = false
@@ -245,6 +262,7 @@ function stop() {
 }
 
 function onInput() {
+  emitProgress()
   if (props.mode === 'free' && typedText.value.length >= props.referenceText.length) {
     finish()
   }
@@ -274,10 +292,10 @@ function blockArticleClipboard(e) {
 }
 
 function finish() {
-  if (finished.value) return
+  if (!started.value || finished.value) return
   clearInterval(timer)
   finished.value = true
-  elapsed.value = getActiveElapsed()
+  elapsed.value = props.mode === 'test' ? Math.min(getActiveElapsed(), props.timeLimit) : getActiveElapsed()
 
   const stats = calcStats(typedText.value, props.referenceText, elapsed.value)
   const level = resolveLevel(stats.wpm, stats.accuracy)
@@ -323,9 +341,35 @@ watch(() => [props.referenceText, props.mode], () => {
   reset()
 })
 
+onMounted(() => {
+  const state = props.initialState
+  if (!state || typeof state.typed_text !== 'string' || !state.started) return
+  if (!Number.isFinite(state.start_time) || state.start_time <= 0) return
+  typedText.value = state.typed_text
+  started.value = true
+  finished.value = !!state.finished
+  startTime.value = state.start_time
+  paused.value = !!state.paused
+  pausedDuration.value = Number(state.paused_duration) || 0
+  pauseStart.value = Number(state.pause_start) || 0
+  result.value = state.result || null
+  // 完成的题目保持锁定；未完成的题目继续使用原来的计时起点。
+  if (finished.value && result.value) {
+    emitState()
+    return
+  }
+  finished.value = false
+  tick()
+  if (!finished.value) {
+    timer = setInterval(tick, 200)
+    emit('started')
+    emitState()
+  }
+})
+
 onUnmounted(() => clearInterval(timer))
 
-defineExpose({ reset, start, pause, resume, stop, started, finished, paused, result })
+defineExpose({ reset, start, pause, resume, stop, finish, started, finished, paused, result })
 </script>
 
 <style scoped>

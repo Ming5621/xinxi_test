@@ -198,7 +198,7 @@ async function handleResetPassword(row) {
 }
 
 async function handleDelete(row) {
-  await ElMessageBox.confirm(`确定删除学生「${row.name}」吗？`, '警告', { type: 'warning' })
+  await ElMessageBox.confirm(`确定删除学生「${row.name}」及其考试、打字记录吗？此操作不可恢复。`, '警告', { type: 'warning' })
   await userApi.delete(row.id)
   ElMessage.success('删除成功')
   await loadStudents()

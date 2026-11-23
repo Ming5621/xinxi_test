@@ -98,7 +98,7 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-APP_VERSION = "1.2.13"
+APP_VERSION = "1.2.14"
 
 _PROXY_ENV_KEYS = (
     "HTTP_PROXY",
@@ -494,7 +494,7 @@ class LauncherApp:
 
         hint = (
             "登录说明\n"
-            "  学生：登录页输入姓名即可\n"
+            "  学生：选择班级，输入姓名和密码\n"
             "  教师：teacher1~teacher4\n"
             f"\n日志目录: {get_data_dir()}"
         )

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import DEFAULT_STUDENT_PASSWORD, get_password_hash, require_teacher
 from ..database import get_db
-from ..models import User, UserRole
+from ..models import Exam, TypingClassSession, TypingRecord, TypingText, User, UserRole
 from ..permissions import (
     active_student_name_taken,
     apply_student_scope,
@@ -318,7 +318,18 @@ def delete_user(
         raise HTTPException(status_code=400, detail="不能删除管理员账号")
     _ensure_manage_user(current_user, user)
     if user.role == UserRole.teacher:
+        if (
+            db.query(Exam.id).filter(Exam.created_by == user.id).first()
+            or db.query(TypingText.id).filter(TypingText.teacher_id == user.id).first()
+            or db.query(TypingClassSession.id).filter(TypingClassSession.teacher_id == user.id).first()
+        ):
+            raise HTTPException(status_code=400, detail="教师已有教学数据，请禁用账号以保留文章、考试与历史记录")
         set_teacher_classes(db, user, [])
+    if user.role == UserRole.student:
+        for session in user.exam_sessions:
+            db.delete(session)
+        db.query(TypingRecord).filter(TypingRecord.student_id == user.id).delete(synchronize_session=False)
+        db.flush()
     db.delete(user)
     db.commit()
     return {"message": "删除成功"}

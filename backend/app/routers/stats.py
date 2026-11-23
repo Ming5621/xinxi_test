@@ -93,11 +93,10 @@ def exam_statistics(
     question_stats = []
     for q in exam.questions:
         correct = 0
-        total = 0
+        total = len(submitted)
         for s in submitted:
             for ans in s.answers:
                 if ans.question_id == q.id:
-                    total += 1
                     if ans.is_correct:
                         correct += 1
         rate = (correct / total * 100) if total > 0 else 0

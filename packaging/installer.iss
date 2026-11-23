@@ -2,7 +2,7 @@
 ; 需先运行 build_windows.bat，再安装 Inno Setup 6 后执行本脚本
 
 #define MyAppName "微机教室考试系统"
-#define MyAppVersion "1.2.13"
+#define MyAppVersion "1.2.14"
 #define MyAppPublisher "柴延明"
 #define MyAppExeName "ExamSystem.exe"
 

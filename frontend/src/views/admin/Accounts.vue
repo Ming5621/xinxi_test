@@ -373,7 +373,8 @@ async function handleSave() {
 
 async function handleDelete(row) {
   const label = roleLabel(row.role)
-  await ElMessageBox.confirm(`确定删除${label}「${row.name}」吗？此操作不可恢复。`, '警告', { type: 'warning' })
+  const related = row.role === 'student' ? '及其考试、打字记录' : ''
+  await ElMessageBox.confirm(`确定删除${label}「${row.name}」${related}吗？此操作不可恢复。`, '警告', { type: 'warning' })
   await userApi.delete(row.id)
   ElMessage.success('删除成功')
   await loadUsers()

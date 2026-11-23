@@ -29,27 +29,30 @@
           <span class="question-score">{{ currentQuestion.score }} 分</span>
         </div>
 
-        <template v-if="currentQuestion.type === 'typing'">
-          <p class="typing-hint">请在下方输入框中录入以下文字（限时 {{ currentQuestion.typing_config?.time_limit || 120 }} 秒）</p>
+        <div v-for="question in typingQuestions" :key="question.id" v-show="currentQuestion.id === question.id">
+          <p class="typing-hint">请在下方输入框中录入以下文字（限时 {{ question.typing_config?.time_limit || 120 }} 秒）</p>
           <TypingTest
-            :reference-text="currentQuestion.content"
-            :time-limit="currentQuestion.typing_config?.time_limit || 120"
-            :max-score="currentQuestion.score"
-            :typing-config="currentQuestion.typing_config"
+            :ref="el => setTypingRef(question.id, el)"
+            :initial-state="typingDrafts[question.id]"
+            @progress="onTypingProgress(question.id, $event)"
+            :reference-text="question.content"
+            :time-limit="question.typing_config?.time_limit || 120"
+            :max-score="question.score"
+            :typing-config="question.typing_config"
             mode="test"
             :skip-confirm="true"
             disable-retry
-            @complete="onTypingComplete(currentQuestion.id, $event)"
+            @complete="onTypingComplete(question.id, $event)"
           />
-          <div class="typing-result" v-if="answerMeta[currentQuestion.id]">
-            <el-tag type="success" effect="dark">{{ answerMeta[currentQuestion.id].level }}</el-tag>
-            <span>{{ answerMeta[currentQuestion.id].wpm }} 字/分</span>
-            <span>准确率 {{ answerMeta[currentQuestion.id].accuracy }}%</span>
-            <span v-if="answerMeta[currentQuestion.id].score != null">评分 {{ answerMeta[currentQuestion.id].score }} 分</span>
+          <div class="typing-result" v-if="answerMeta[question.id]">
+            <el-tag type="success" effect="dark">{{ answerMeta[question.id].level }}</el-tag>
+            <span>{{ answerMeta[question.id].wpm }} 字/分</span>
+            <span>准确率 {{ answerMeta[question.id].accuracy }}%</span>
+            <span v-if="answerMeta[question.id].score != null">评分 {{ answerMeta[question.id].score }} 分</span>
           </div>
-        </template>
+        </div>
 
-        <template v-else>
+        <template v-if="currentQuestion.type !== 'typing'">
         <div class="question-content">{{ currentQuestion.content }}</div>
 
         <div class="options" v-if="currentQuestion.type === 'choice'">
@@ -144,7 +147,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { examApi } from '@/api'
 import TypingTest from '@/components/TypingTest.vue'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const examId = Number(route.params.id)
@@ -154,14 +159,27 @@ const exam = ref(null)
 const questions = ref([])
 const answers = ref({})
 const answerMeta = ref({})
+const typingDrafts = ref({})
+const typingRefs = new Map()
 const currentIndex = ref(0)
 const timeLeft = ref(0)
 const sessionStartTime = ref(null)
 const submitting = ref(false)
-const draftKey = `exam_draft_${examId}`
+let draftKey = null
 let timer = null
 
 const currentQuestion = computed(() => questions.value[currentIndex.value])
+const typingQuestions = computed(() => questions.value.filter(q => q.type === 'typing'))
+
+function setTypingRef(id, component) {
+  if (component) typingRefs.set(id, component)
+  else typingRefs.delete(id)
+}
+
+function onTypingProgress(id, state) {
+  typingDrafts.value[id] = state
+  if (state.started) answers.value[id] = state.typed_text
+}
 
 // 滚轮会让仍聚焦的按钮收到 click（detail 常为 0，且没有按下主键）。
 // 只接受「刚发生过的鼠标左键按下」触发的点击，并在滚轮后短暂忽略按钮点击。
@@ -225,9 +243,11 @@ function getRemainingSeconds(durationMinutes, startTime) {
 }
 
 function saveDraft() {
+  if (!draftKey) return
   sessionStorage.setItem(draftKey, JSON.stringify({
     answers: answers.value,
     answerMeta: answerMeta.value,
+    typingDrafts: typingDrafts.value,
     currentIndex: currentIndex.value,
   }))
 }
@@ -239,7 +259,8 @@ function loadDraft() {
     const draft = JSON.parse(raw)
     answers.value = draft.answers || {}
     answerMeta.value = draft.answerMeta || {}
-    currentIndex.value = draft.currentIndex || 0
+    typingDrafts.value = draft.typingDrafts || {}
+    currentIndex.value = Math.max(0, Math.min(Number(draft.currentIndex) || 0, questions.value.length - 1))
   } catch {
     sessionStorage.removeItem(draftKey)
   }
@@ -295,6 +316,7 @@ onMounted(async () => {
   try {
     const session = await examApi.start(examId)
     sessionStartTime.value = session.start_time
+    draftKey = `exam_draft_${auth.user.id}_${examId}_${session.id}_${session.start_time}`
     const [examData, qs] = await Promise.all([
       examApi.get(examId),
       examApi.questions(examId).catch(() => []),
@@ -327,7 +349,7 @@ onMounted(async () => {
   }
 })
 
-watch([answers, answerMeta, currentIndex], saveDraft, { deep: true })
+watch([answers, answerMeta, typingDrafts, currentIndex], saveDraft, { deep: true })
 
 onUnmounted(() => {
   clearInterval(timer)
@@ -396,6 +418,9 @@ async function doSubmit() {
   if (submitting.value) return
   submitting.value = true
   try {
+    for (const component of typingRefs.values()) {
+      if (component.started && !component.finished) component.finish()
+    }
     const payload = {
       answers: Object.entries(answers.value).map(([question_id, student_answer]) => ({
         question_id: Number(question_id),

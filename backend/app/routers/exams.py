@@ -49,6 +49,7 @@ def _exam_to_out(exam: Exam) -> ExamOut:
         created_at=exam.created_at,
         question_count=len(exam.questions),
         total_score=total,
+        has_sessions=bool(exam.sessions),
     )
 
 
@@ -61,6 +62,12 @@ def _grade_session(session: ExamSession, db: Session):
     for question in exam.questions:
         answer = existing.get(question.id)
         if not answer:
+            answer = Answer(session_id=session.id, question_id=question.id, student_answer="", is_correct=False, score=0)
+            db.add(answer)
+            continue
+        if not answer.student_answer.strip():
+            answer.is_correct = False
+            answer.score = 0
             continue
 
         if question.type == QuestionType.typing:
@@ -181,6 +188,19 @@ def update_exam(
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
 
+    # 已有答卷引用题目 ID；替换题目会使历史答案错配或失去关联。
+    if exam.sessions and (
+        data.questions is not None
+        or (data.duration_minutes is not None and data.duration_minutes != exam.duration_minutes)
+        or (data.pass_score is not None and data.pass_score != exam.pass_score)
+        or data.status == ExamStatus.draft
+    ):
+        raise HTTPException(status_code=400, detail="已有学生开始考试，不能修改题目、时长、及格分或退回草稿")
+    final_questions = data.questions if data.questions is not None else exam.questions
+    final_status = data.status if data.status is not None else exam.status
+    if final_status == ExamStatus.published and not final_questions:
+        raise HTTPException(status_code=400, detail="考试没有题目，无法发布")
+
     if data.title is not None:
         exam.title = data.title
     if data.description is not None:
@@ -191,8 +211,6 @@ def update_exam(
         exam.pass_score = data.pass_score
     if data.status is not None:
         if data.status == ExamStatus.published:
-            if not exam.questions:
-                raise HTTPException(status_code=400, detail="考试没有题目，无法发布")
             exam.status = ExamStatus.published
             if not exam.start_time:
                 exam.start_time = datetime.utcnow()

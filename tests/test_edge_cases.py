@@ -2,6 +2,7 @@
 """边界情况与潜在 Bug 测试"""
 import json
 import sys
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -190,7 +191,7 @@ if code == 200:
 req("DELETE", f"/exams/{update_id}", token=teacher)
 
 # Bug 8: 选择题选项解析 - 判断题答案变体
-sys.path.insert(0, "/workspace/backend")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.import_utils import parse_questions_text
 qs, _ = parse_questions_text("类型,题目,选项A,选项B,答案,分值\njudge,地球是圆的,,,对,10")
 check("判断题'对'解析为正确", qs and qs[0]["correct_answer"] == "正确", str(qs))

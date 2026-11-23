@@ -14,7 +14,7 @@
       :title="`课堂打字测试进行中：${classSession.title}`"
     >
       <template #default>
-        <p>教师 {{ classSession.teacher_name }} 发起了 5 分钟打字测试，文章：{{ classSession.text_title }}</p>
+        <p>教师 {{ classSession.teacher_name }} 发起了 {{ classSession.duration_seconds }} 秒打字测试，文章：{{ classSession.text_title }}</p>
         <el-button type="primary" size="small" style="margin-top: 8px" @click="joinClassTest">立即参加</el-button>
       </template>
     </el-alert>
@@ -104,7 +104,7 @@
         :key="`${selected.id}-${practiceMode}-${sessionKey}-${inClassTest}`"
         :reference-text="selected.content"
         :mode="practiceMode"
-        :time-limit="300"
+        :time-limit="inClassTest ? joinedSession.duration_seconds : 300"
         :allow-stop="!inClassTest"
         expanded
         hide-controls
@@ -161,6 +161,7 @@ const practiceMode = ref('free')
 const sessionKey = ref(0)
 const typingRef = ref()
 const classSession = ref(null)
+const joinedSession = ref(null)
 const inClassTest = ref(false)
 const panelPaused = ref(false)
 const lastFinished = ref(false)
@@ -225,6 +226,8 @@ function modeLabel(source) {
 }
 
 async function checkClassSession() {
+  // 已参加的测试使用进入时的场次信息，轮询不能替换或卸载正在输入的面板。
+  if (inClassTest.value) return
   classSession.value = await typingApi.activeSession()
   if (!classSession.value && inClassTest.value) {
     inClassTest.value = false
@@ -234,6 +237,7 @@ async function checkClassSession() {
 
 function joinClassTest() {
   if (!classSession.value) return
+  joinedSession.value = { ...classSession.value }
   inClassTest.value = true
   selectedId.value = classSession.value.text_id
   practiceMode.value = 'test'
@@ -283,8 +287,8 @@ async function handleComplete(data) {
     duration_seconds: data.duration_seconds,
     source: data.mode === 'test' ? 'test' : 'practice',
   }
-  if (inClassTest.value && classSession.value) {
-    payload.typing_session_id = classSession.value.id
+  if (inClassTest.value && joinedSession.value) {
+    payload.typing_session_id = joinedSession.value.id
   }
   const result = await typingApi.submit(payload)
   lastResult.value = result

@@ -9,6 +9,7 @@ on:
       - 'frontend/**'
       - 'packaging/**'
       - '.github/workflows/build-windows.yml'
+      - 'tests/**'
 
 permissions:
   contents: write
@@ -58,8 +59,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install -r backend/requirements.txt
+          python -m pip install -r tests/requirements.txt
           python -m pip install pyinstaller==6.11.1
+
+      - name: Run backend regression tests
+        shell: pwsh
+        run: |
+          python tests/test_regressions.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_typing_utils.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_timeutil.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: PyInstaller build
         run: pyinstaller packaging/exam_system.spec --noconfirm --clean
@@ -131,7 +142,13 @@ jobs:
             - **ExamSystem-Setup.exe**：Windows 安装程序。
             - **ExamSystem.zip**：便携版。解压整个压缩包后运行 ExamSystem.exe。
 
-            本版支持管理员管理、分配和删除班级，学生使用姓名和密码登录，新增账号自动用姓名生成用户名。首次登录或教师重置密码后，学生须先修改初始密码。
+            - 修复多道打字题切换、刷新恢复及交卷时的答案丢失；课堂测试按教师设置的时长运行。
+            - 修复有历史成绩的学生删除失败、漏答题统计、题库和教师数据包导入问题。
+            - 加固静态文件访问、成绩导出范围及 Excel 导出内容处理。
+            - 已有答卷的考试锁定题目、时长与及格分，仍可编辑名称和说明。
+            - 教师、管理员重置密码后撤销旧会话；升级后需重新登录一次。
+
+            删除学生会同时删除考试和打字记录。已有教学数据的教师账号请使用禁用，以保留历史数据。
           files: |
             release/ExamSystem-Setup.exe
             release/ExamSystem.zip

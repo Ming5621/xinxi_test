@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 
 from .auth import DEFAULT_STUDENT_PASSWORD, get_password_hash
@@ -19,6 +20,7 @@ from .permissions import (
     teacher_can_manage_class,
 )
 from .timeutil import serialize_utc_datetime, utc_now
+from .schemas import ExamCreate, TypingTextCreate
 
 PACK_FORMAT = "xinxi_teacher_pack"
 PACK_VERSION = 1
@@ -89,6 +91,9 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
         version = 0
     if version != PACK_VERSION:
         raise HTTPException(status_code=400, detail="数据包版本不受支持")
+    for key in ("classes", "students", "typing_texts", "exams"):
+        if payload.get(key) is not None and not isinstance(payload[key], list):
+            raise HTTPException(status_code=400, detail=f"数据包 {key} 必须是列表")
 
     errors: list[str] = []
     class_count = 0
@@ -122,6 +127,9 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
             errors.append("跳过缺少用户名或姓名的学生")
             continue
         try:
+            from .routers.users import _clean_name, _clean_username
+            username = _clean_username(username)
+            name = _clean_name(name, for_student=True)
             class_name = resolve_student_class(current_user, class_name)
         except HTTPException as exc:
             errors.append(f"学生 {username}：{exc.detail}")
@@ -181,21 +189,25 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
         if not title or not content:
             errors.append("跳过缺少标题或正文的打字文章")
             continue
+        try:
+            data = TypingTextCreate.model_validate({**item, "title": title, "content": content})
+        except ValidationError:
+            errors.append(f"打字文章「{title}」字段无效，已跳过")
+            continue
         query = db.query(TypingText).filter(TypingText.title == title)
         if current_user.role == UserRole.teacher:
             query = query.filter(TypingText.teacher_id == current_user.id)
         if query.first():
             errors.append(f"打字文章「{title}」已存在，已跳过")
             continue
-        difficulty = _parse_difficulty(item.get("difficulty"))
         db.add(
             TypingText(
                 teacher_id=owner_id,
                 title=title,
                 content=content,
-                difficulty=difficulty,
-                char_count=int(item.get("char_count") or len(content)),
-                time_limit=int(item.get("time_limit") or 120),
+                difficulty=data.difficulty,
+                char_count=len(content),
+                time_limit=data.time_limit,
                 is_active=bool(item.get("is_active", True)),
             )
         )
@@ -208,6 +220,15 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
         if not title:
             errors.append("跳过缺少标题的考试")
             continue
+        try:
+            data = ExamCreate.model_validate({**item, "title": title})
+        except ValidationError:
+            errors.append(f"考试「{title}」字段无效，已跳过")
+            continue
+        status = _parse_exam_status(item.get("status"))
+        if status.value == "published" and not data.questions:
+            errors.append(f"考试「{title}」没有题目，已跳过")
+            continue
         query = db.query(Exam).filter(Exam.title == title)
         if current_user.role == UserRole.teacher:
             query = query.filter(Exam.created_by == current_user.id)
@@ -216,33 +237,24 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict) -> dict:
             continue
         exam = Exam(
             title=title,
-            description=str(item.get("description") or ""),
-            duration_minutes=int(item.get("duration_minutes") or 60),
-            pass_score=float(item.get("pass_score") or 60),
+            description=data.description,
+            duration_minutes=data.duration_minutes,
+            pass_score=data.pass_score,
             created_by=current_user.id,
-            status=_parse_exam_status(item.get("status")),
+            status=status,
         )
         db.add(exam)
         db.flush()
-        for idx, raw_q in enumerate(item.get("questions") or []):
-            if not isinstance(raw_q, dict):
-                continue
-            content = str(raw_q.get("content") or "").strip()
-            if not content:
-                continue
-            try:
-                qtype = QuestionType(raw_q.get("type"))
-            except ValueError:
-                continue
+        for idx, question in enumerate(data.questions):
             db.add(
                 Question(
                     exam_id=exam.id,
-                    type=qtype,
-                    content=content,
-                    options=raw_q.get("options") or [],
-                    correct_answer=str(raw_q.get("correct_answer") or ""),
-                    score=float(raw_q.get("score") or 5),
-                    order_num=int(raw_q.get("order_num") or idx),
+                    type=question.type,
+                    content=question.content,
+                    options=question.options,
+                    correct_answer=question.correct_answer,
+                    score=question.score,
+                    order_num=question.order_num or idx,
                 )
             )
         exam_count += 1

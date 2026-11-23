@@ -1,6 +1,7 @@
 """批量导入解析工具"""
 import csv
 import io
+import math
 import re
 from typing import Optional
 
@@ -119,9 +120,9 @@ def _parse_question_type(raw: str) -> Optional[QuestionType]:
 def normalize_answer(answer: str, qtype: QuestionType) -> str:
     answer = answer.strip()
     if qtype == QuestionType.judge:
-        if answer in {"对", "正确", "true", "t", "√", "是", "yes", "1"}:
+        if answer.lower() in {"对", "正确", "true", "t", "√", "是", "yes", "1"}:
             return "正确"
-        if answer in {"错", "错误", "false", "f", "×", "否", "no", "0"}:
+        if answer.lower() in {"错", "错误", "false", "f", "×", "否", "no", "0"}:
             return "错误"
         return answer
     return answer.upper()
@@ -129,7 +130,7 @@ def normalize_answer(answer: str, qtype: QuestionType) -> str:
 
 def parse_questions_text(text: str, default_score: float = 10.0) -> tuple[list[dict], list[str]]:
     """解析题目批量导入文本，支持块格式和 CSV 格式"""
-    text = text.strip()
+    text = text.lstrip("\ufeff").strip()
     if not text:
         return [], ["导入内容为空"]
 
@@ -149,7 +150,7 @@ def parse_questions_text(text: str, default_score: float = 10.0) -> tuple[list[d
 
 def _parse_questions_csv(text: str, default_score: float) -> tuple[list[dict], list[str]]:
     delimiter = "\t" if "\t" in text.split("\n")[0] else ","
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
     rows = list(reader)
     if not rows:
         return [], []
@@ -194,6 +195,9 @@ def _parse_questions_csv(text: str, default_score: float) -> tuple[list[dict], l
                 score_raw = row[header_map["score"]].strip()
                 if score_raw:
                     score = float(score_raw)
+            if not math.isfinite(score) or score < 0:
+                errors.append(f"第 {line_no} 行：分值必须是非负有限数字")
+                continue
 
             options: list[str] = []
             if qtype == QuestionType.choice:
@@ -277,9 +281,12 @@ def _parse_questions_block(text: str, default_score: float) -> tuple[list[dict],
             if ans_match:
                 answer = ans_match.group(1).strip()
                 continue
-            score_match = re.match(r"^(分值|分数|score)[：:]\s*([\d.]+)", ln, re.I)
+            score_match = re.match(r"^(分值|分数|score)[：:]\s*(.*)$", ln, re.I)
             if score_match:
-                score = float(score_match.group(2))
+                try:
+                    score = float(score_match.group(2))
+                except ValueError:
+                    score = float("nan")
                 continue
             opt_match = re.match(r"^([A-Da-d])[.、:：]\s*(.+)", ln)
             if opt_match and qtype == QuestionType.choice:
@@ -288,6 +295,9 @@ def _parse_questions_block(text: str, default_score: float) -> tuple[list[dict],
             if not content and ln != answer:
                 content = ln
 
+        if not math.isfinite(score) or score < 0:
+            errors.append(f"第 {idx} 题：分值必须是非负有限数字")
+            continue
         if not content:
             errors.append(f"第 {idx} 题：题目内容不能为空")
             continue

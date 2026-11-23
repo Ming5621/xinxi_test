@@ -53,6 +53,11 @@ def student_credential(user_id: int, password_hash: str) -> str:
     return sha256(f"{user_id}:{password_hash}".encode()).hexdigest()
 
 
+def staff_credential(user: User) -> str:
+    # 同时绑定账号身份与密码，防止重置密码或删除后复用 ID 时沿用旧会话。
+    return sha256(f"{user.id}:{user.password_hash}:{UserRole(user.role).value}:{user.created_at}".encode()).hexdigest()
+
+
 @lru_cache(maxsize=1)
 def auth_signing_key() -> str:
     key = select(AuthSigningKey.secret).where(AuthSigningKey.id == 1)
@@ -100,8 +105,14 @@ def _get_session_user(token: str, db: Session, *, password_change: bool = False)
             or user.must_change_password != password_change
         ):
             raise credentials_exception
-    elif password_change or credential is not None:
-        raise credentials_exception
+    else:
+        staff_claim = payload.get("staff_credential")
+        if (
+            password_change or credential is not None
+            or not isinstance(staff_claim, str)
+            or not compare_digest(staff_claim.encode(), staff_credential(user).encode())
+        ):
+            raise credentials_exception
     return user
 
 

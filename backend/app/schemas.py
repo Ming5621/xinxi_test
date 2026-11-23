@@ -1,7 +1,8 @@
 from datetime import datetime
+import math
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .models import ExamStatus, QuestionType, SessionStatus, TypingClassSessionStatus, TypingDifficulty, UserRole
 from .timeutil import UtcDateTime
@@ -85,7 +86,23 @@ class QuestionBase(BaseModel):
 
 
 class QuestionCreate(QuestionBase):
-    pass
+    score: float = Field(default=5.0, ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_typing_config(self):
+        if self.type == QuestionType.typing:
+            from .typing_utils import parse_typing_config
+            config = parse_typing_config(self.options)
+            for key in ("time_limit", "min_wpm", "pass_wpm", "excellent_wpm", "min_accuracy"):
+                try:
+                    value = float(config[key])
+                except (TypeError, ValueError, OverflowError):
+                    raise ValueError(f"打字配置 {key} 必须是有效数字")
+                if not math.isfinite(value) or value <= 0 or (key == "min_accuracy" and value > 100):
+                    raise ValueError(f"打字配置 {key} 超出有效范围")
+                config[key] = value
+            self.options = config
+        return self
 
 
 class QuestionOut(QuestionBase):
@@ -116,14 +133,16 @@ class ExamBase(BaseModel):
 
 
 class ExamCreate(ExamBase):
+    duration_minutes: int = Field(default=60, gt=0)
+    pass_score: float = Field(default=60.0, ge=0, allow_inf_nan=False)
     questions: list[QuestionCreate] = []
 
 
 class ExamUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    duration_minutes: Optional[int] = None
-    pass_score: Optional[float] = None
+    duration_minutes: Optional[int] = Field(default=None, gt=0)
+    pass_score: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     status: Optional[ExamStatus] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
@@ -138,6 +157,7 @@ class ExamOut(ExamBase):
     created_at: UtcDateTime
     question_count: int = 0
     total_score: float = 0.0
+    has_sessions: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -151,6 +171,18 @@ class AnswerSubmit(BaseModel):
     question_id: int
     student_answer: str = ""
     answer_meta: Optional[dict] = None
+
+    @field_validator("answer_meta")
+    @classmethod
+    def validate_duration(cls, meta):
+        if meta is not None and meta.get("duration_seconds") is not None:
+            try:
+                duration = float(meta["duration_seconds"])
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("打字用时必须是有效数字")
+            if not math.isfinite(duration) or duration < 0:
+                raise ValueError("打字用时必须是非负有限数字")
+        return meta
 
 
 class ExamSubmitRequest(BaseModel):
@@ -293,14 +325,14 @@ class TypingTextCreate(BaseModel):
     title: str
     content: str
     difficulty: TypingDifficulty = TypingDifficulty.basic
-    time_limit: int = 120
+    time_limit: int = Field(default=120, ge=30, le=600)
 
 
 class TypingTextUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     difficulty: Optional[TypingDifficulty] = None
-    time_limit: Optional[int] = None
+    time_limit: Optional[int] = Field(default=None, ge=30, le=600)
 
 
 class TypingTextImportRequest(BaseModel):
@@ -322,7 +354,7 @@ class TypingSubmitRequest(BaseModel):
     typing_session_id: Optional[int] = None
     reference_text: str
     typed_text: str
-    duration_seconds: float
+    duration_seconds: float = Field(gt=0, allow_inf_nan=False)
     source: str = "practice"
 
 
@@ -368,7 +400,7 @@ class TypingClassSessionCreate(BaseModel):
     text_id: int
     class_name: str
     title: str = ""
-    duration_seconds: int = 300
+    duration_seconds: int = Field(default=300, gt=0)
 
 
 class TypingClassSessionOut(BaseModel):

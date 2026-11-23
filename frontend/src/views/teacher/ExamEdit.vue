@@ -15,13 +15,13 @@
           </el-col>
           <el-col :span="6">
             <el-form-item label="考试时长">
-              <el-input-number v-model="form.duration_minutes" :min="5" :max="300" />
+              <el-input-number v-model="form.duration_minutes" :min="5" :max="300" :disabled="hasSessions" />
               <span style="margin-left: 8px; color: #9ca3af">分钟</span>
             </el-form-item>
           </el-col>
           <el-col :span="6">
             <el-form-item label="及格分数">
-              <el-input-number v-model="form.pass_score" :min="0" :max="100" />
+              <el-input-number v-model="form.pass_score" :min="0" :max="100" :disabled="hasSessions" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -31,7 +31,8 @@
       </el-form>
     </div>
 
-    <div class="content-card">
+    <el-alert v-if="hasSessions" title="已有学生开始考试，题目、时长与及格分已锁定，仍可修改名称和说明。" type="info" :closable="false" style="margin-bottom: 16px" />
+    <fieldset class="content-card" :disabled="hasSessions" style="border: 0; min-width: 0">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
         <h3>题目列表 <el-tag size="small">{{ form.questions.length }} 题 · 满分 {{ totalScore }} 分</el-tag></h3>
         <div>
@@ -103,7 +104,7 @@
       </div>
 
       <el-empty v-if="form.questions.length === 0" description="请添加题目" />
-    </div>
+    </fieldset>
 
     <div style="text-align: center; padding: 20px 0">
       <el-button size="large" @click="$router.back()">取消</el-button>
@@ -162,6 +163,7 @@ const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
 const loading = ref(false)
 const saving = ref(false)
+const hasSessions = ref(false)
 const importVisible = ref(false)
 
 const form = ref({
@@ -217,6 +219,7 @@ onMounted(async () => {
   if (isEdit.value) {
     loading.value = true
     const exam = await examApi.get(Number(route.params.id))
+    hasSessions.value = exam.has_sessions
     form.value = {
       title: exam.title,
       description: exam.description,
@@ -275,7 +278,9 @@ async function handleSave() {
       }),
     }
     if (isEdit.value) {
-      await examApi.update(Number(route.params.id), payload)
+      await examApi.update(Number(route.params.id), hasSessions.value
+        ? { title: form.value.title, description: form.value.description }
+        : payload)
       ElMessage.success('保存成功')
     } else {
       await examApi.create(payload)

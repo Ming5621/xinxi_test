@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +12,7 @@ Base.metadata.create_all(bind=engine)
 migrate_student_passwords(engine)
 auth_signing_key()
 
-app = FastAPI(title="微机教室考试系统", version="1.2.13")
+app = FastAPI(title="微机教室考试系统", version="1.2.14")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +45,10 @@ if STATIC_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        file_path = STATIC_DIR / full_path
+        static_root = STATIC_DIR.resolve()
+        file_path = (static_root / full_path).resolve()
+        if not file_path.is_relative_to(static_root):
+            raise HTTPException(status_code=404, detail="文件不存在")
         if file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(STATIC_DIR / "index.html")

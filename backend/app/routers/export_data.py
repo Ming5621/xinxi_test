@@ -29,6 +29,12 @@ router = APIRouter(prefix="/api/export", tags=["数据导出"])
 
 
 def _workbook_response(wb: Workbook, filename: str) -> StreamingResponse:
+    # 导出字段来自姓名、文章标题等用户输入，不能让 Excel 将其执行为公式。
+    for sheet in wb:
+        for row in sheet:
+            for cell in row:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -168,7 +174,7 @@ def export_typing_records(
     wb = Workbook()
     summary = _sheet_title(wb, "成绩汇总")
     summary.append(["姓名", "班级", "练习次数", "平均评分", "平均速度(字/分)", "最佳速度(字/分)", "平均准确率(%)", "最近等级"])
-    for row in _typing_summary_rows(db, current_user, class_name):
+    for row in _typing_summary_rows(db, current_user, class_name, student_id):
         summary.append([
             row["student_name"],
             row["class_name"],
@@ -207,9 +213,11 @@ _SESSION_STATUS = {
 }
 
 
-def _typing_summary_rows(db: Session, current_user: User, class_name: str | None) -> list[dict]:
+def _typing_summary_rows(db: Session, current_user: User, class_name: str | None, student_id: int | None = None) -> list[dict]:
     """与打字统计页同一口径：按学生汇总最近练习。"""
     query = apply_student_scope(db.query(User), current_user, class_name).filter(User.is_active == True)
+    if student_id is not None:
+        query = query.filter(User.id == student_id)
     students = query.order_by(User.class_name, User.id).all()
 
     rows = []
@@ -268,6 +276,8 @@ def export_typing_session(
     if not session:
         raise HTTPException(status_code=404, detail="测试不存在")
     ensure_class_access(current_user, session.class_name)
+    if current_user.role == UserRole.teacher and session.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="只能导出自己发起的课堂测试")
 
     records = (
         db.query(TypingRecord)
@@ -277,17 +287,18 @@ def export_typing_session(
     )
     by_student = {record.student_id: record for record in records}
     students = (
-        db.query(User)
+        apply_student_scope(db.query(User), current_user, session.class_name)
         .filter(
-            User.role == UserRole.student,
             User.is_active == True,
-            User.class_name == session.class_name,
         )
         .order_by(User.name, User.id)
         .all()
     )
     known_ids = {student.id for student in students}
-    extras = [record.student for record in records if record.student and record.student_id not in known_ids]
+    extras = [
+        record.student for record in records
+        if record.student_id not in known_ids and student_in_scope(current_user, record.student)
+    ]
 
     title = session.title or "课堂打字测试"
     wb = Workbook()

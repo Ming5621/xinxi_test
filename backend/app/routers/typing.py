@@ -299,11 +299,15 @@ async def import_texts_file(
 
 
 def _session_to_out(session: TypingClassSession, db: Session) -> TypingClassSessionOut:
-    participant_count = (
+    participant_query = (
         db.query(User)
         .filter(User.role == UserRole.student, User.class_name == session.class_name, User.is_active == True)
-        .count()
     )
+    if session.teacher:
+        participant_query = apply_student_scope(participant_query, session.teacher)
+    else:
+        participant_query = participant_query.filter(False)
+    participant_count = participant_query.count()
     submitted_count = (
         db.query(TypingRecord).filter(TypingRecord.typing_session_id == session.id).count()
     )
@@ -377,20 +381,29 @@ def session_detail(
     if not session:
         raise HTTPException(status_code=404, detail="测试不存在")
     if current_user.role == UserRole.student:
-        if session.class_name != current_user.class_name:
+        if (
+            session.class_name != current_user.class_name
+            or current_user.managed_by_teacher_id not in (None, session.teacher_id)
+        ):
             raise HTTPException(status_code=403, detail="无权查看")
     elif current_user.role == UserRole.teacher and session.teacher_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权查看其他教师的课堂测试")
     else:
         ensure_class_access(current_user, session.class_name)
 
-    records = (
+    records_query = (
         db.query(TypingRecord)
         .options(joinedload(TypingRecord.student), joinedload(TypingRecord.text))
         .filter(TypingRecord.typing_session_id == session_id)
         .order_by(TypingRecord.score.desc())
-        .all()
     )
+    if current_user.role == UserRole.student:
+        records_query = records_query.filter(TypingRecord.student_id == current_user.id)
+    elif current_user.role == UserRole.teacher:
+        records_query = apply_student_scope(
+            records_query.join(User, TypingRecord.student_id == User.id), current_user,
+        )
+    records = records_query.all()
     out = _session_to_out(session, db)
     return TypingClassSessionDetail(**out.model_dump(), records=[_record_to_out(r) for r in records])
 
@@ -422,7 +435,7 @@ def create_session(
         teacher_id=current_user.id,
         text_id=data.text_id,
         class_name=data.class_name,
-        title=data.title or f"{data.class_name} · 5分钟打字测试",
+        title=data.title or f"{data.class_name} · {data.duration_seconds}秒打字测试",
         duration_seconds=data.duration_seconds,
         status=TypingClassSessionStatus.pending,
     )
@@ -453,8 +466,16 @@ def start_session(
     if not session:
         raise HTTPException(status_code=404, detail="测试不存在")
     ensure_class_access(current_user, session.class_name)
+    if current_user.role == UserRole.teacher and session.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="只能管理自己发起的课堂测试")
     if session.status != TypingClassSessionStatus.pending:
         raise HTTPException(status_code=400, detail="测试状态不允许开始")
+    active = db.query(TypingClassSession).filter(
+        TypingClassSession.class_name == session.class_name,
+        TypingClassSession.status == TypingClassSessionStatus.active,
+    ).first()
+    if active:
+        raise HTTPException(status_code=400, detail="该班级已有进行中的打字测试")
     session.status = TypingClassSessionStatus.active
     session.started_at = datetime.utcnow()
     db.commit()
@@ -477,6 +498,8 @@ def end_session(
     if not session:
         raise HTTPException(status_code=404, detail="测试不存在")
     ensure_class_access(current_user, session.class_name)
+    if current_user.role == UserRole.teacher and session.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="只能管理自己发起的课堂测试")
     if session.status != TypingClassSessionStatus.active:
         raise HTTPException(status_code=400, detail="测试未在进行中")
     session.status = TypingClassSessionStatus.ended
@@ -498,7 +521,10 @@ def submit_typing(
         typing_session = db.query(TypingClassSession).filter(TypingClassSession.id == data.typing_session_id).first()
         if not typing_session:
             raise HTTPException(status_code=404, detail="课堂测试不存在")
-        if typing_session.class_name != current_user.class_name:
+        if (
+            typing_session.class_name != current_user.class_name
+            or current_user.managed_by_teacher_id not in (None, typing_session.teacher_id)
+        ):
             raise HTTPException(status_code=403, detail="无权参加该测试")
         if typing_session.status != TypingClassSessionStatus.active:
             raise HTTPException(status_code=400, detail="课堂测试未在进行中")
@@ -515,16 +541,16 @@ def submit_typing(
         source = "class_test"
 
     reference_text = data.reference_text
-    if data.text_id:
-        text = db.query(TypingText).filter(TypingText.id == data.text_id, TypingText.is_active == True).first()
+    text_id = typing_session.text_id if typing_session else data.text_id
+    if typing_session and data.text_id is not None and data.text_id != text_id:
+        raise HTTPException(status_code=403, detail="课堂测试文章不匹配")
+    if text_id:
+        text = db.query(TypingText).filter(TypingText.id == text_id, TypingText.is_active == True).first()
         if not text:
             raise HTTPException(status_code=404, detail="练习文章不存在")
         visible_teachers = _student_visible_teacher_ids(db, current_user)
         if text.teacher_id not in visible_teachers and not typing_session:
             raise HTTPException(status_code=403, detail="无权练习该文章")
-        # 课堂测试允许使用本场指定文章
-        if typing_session and text.id != typing_session.text_id:
-            raise HTTPException(status_code=403, detail="课堂测试文章不匹配")
         reference_text = text.content
 
     comparison = compare_text(reference_text, data.typed_text)
@@ -537,7 +563,7 @@ def submit_typing(
 
     record = TypingRecord(
         student_id=current_user.id,
-        text_id=data.text_id,
+        text_id=text_id,
         typing_session_id=typing_session.id if typing_session else None,
         source=source,
         reference_text=reference_text,

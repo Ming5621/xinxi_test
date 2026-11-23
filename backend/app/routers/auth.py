@@ -10,6 +10,7 @@ from ..auth import (
     get_password_hash,
     require_student_password_change,
     student_credential,
+    staff_credential,
     verify_password,
 )
 from ..database import get_db
@@ -47,7 +48,7 @@ def _issue_token(user: User, db: Session) -> TokenResponse:
     token = (
         _student_token(user.id, user.password_hash)
         if user.role == UserRole.student
-        else create_access_token(data={"sub": str(user.id)})
+        else create_access_token(data={"sub": str(user.id), "staff_credential": staff_credential(user)})
     )
     db.commit()
     return TokenResponse(access_token=token, user=profile)
