@@ -1,11 +1,23 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session, joinedload
 
-from ..auth import DEFAULT_STUDENT_PASSWORD, get_password_hash, require_teacher
+from ..auth import DEFAULT_STUDENT_PASSWORD, get_password_hash, require_admin, require_teacher
 from ..database import get_db
-from ..models import Exam, TypingClassSession, TypingRecord, TypingText, User, UserRole
+from ..models import (
+    Answer,
+    Exam,
+    ExamSession,
+    Question,
+    SchoolClass,
+    TypingClassSession,
+    TypingRecord,
+    TypingText,
+    User,
+    UserRole,
+)
 from ..permissions import (
     active_student_name_taken,
     apply_student_scope,
@@ -18,6 +30,8 @@ from ..permissions import (
     validate_student_teacher,
 )
 from ..schemas import UserCreate, UserOut, UserUpdate
+from .presence import _is_online
+from .typing import _record_to_out
 
 router = APIRouter(prefix="/api/users", tags=["用户管理"])
 
@@ -301,35 +315,188 @@ def update_user(
     return user
 
 
-@router.delete("/{user_id}")
-def delete_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_teacher),
-):
-    if user_id == current_user.id:
+class BatchDeleteRequest(BaseModel):
+    user_ids: list[int] = Field(min_length=1, max_length=500)
+    force: bool = False
+
+
+def _teacher_has_teaching_data(db: Session, teacher_id: int) -> bool:
+    return bool(
+        db.query(Exam.id).filter(Exam.created_by == teacher_id).first()
+        or db.query(TypingText.id).filter(TypingText.teacher_id == teacher_id).first()
+        or db.query(TypingClassSession.id).filter(TypingClassSession.teacher_id == teacher_id).first()
+    )
+
+
+def _purge_teacher_data(db: Session, teacher: User) -> None:
+    text_ids = [row.id for row in db.query(TypingText.id).filter(TypingText.teacher_id == teacher.id)]
+    session_query = db.query(TypingClassSession.id).filter(TypingClassSession.teacher_id == teacher.id)
+    if text_ids:
+        session_query = db.query(TypingClassSession.id).filter(
+            (TypingClassSession.teacher_id == teacher.id) | (TypingClassSession.text_id.in_(text_ids))
+        )
+    session_ids = [row.id for row in session_query]
+    if session_ids:
+        db.query(TypingRecord).filter(TypingRecord.typing_session_id.in_(session_ids)).update(
+            {TypingRecord.typing_session_id: None}, synchronize_session=False
+        )
+        db.query(TypingClassSession).filter(TypingClassSession.id.in_(session_ids)).delete(synchronize_session=False)
+    if text_ids:
+        db.query(TypingRecord).filter(TypingRecord.text_id.in_(text_ids)).update(
+            {TypingRecord.text_id: None}, synchronize_session=False
+        )
+        db.query(TypingText).filter(TypingText.id.in_(text_ids)).delete(synchronize_session=False)
+
+    exam_ids = [row.id for row in db.query(Exam.id).filter(Exam.created_by == teacher.id)]
+    if exam_ids:
+        question_ids = [row.id for row in db.query(Question.id).filter(Question.exam_id.in_(exam_ids))]
+        exam_session_ids = [row.id for row in db.query(ExamSession.id).filter(ExamSession.exam_id.in_(exam_ids))]
+        if exam_session_ids:
+            db.query(Answer).filter(Answer.session_id.in_(exam_session_ids)).delete(synchronize_session=False)
+            db.query(ExamSession).filter(ExamSession.id.in_(exam_session_ids)).delete(synchronize_session=False)
+        if question_ids:
+            db.query(Answer).filter(Answer.question_id.in_(question_ids)).delete(synchronize_session=False)
+            db.query(Question).filter(Question.id.in_(question_ids)).delete(synchronize_session=False)
+        db.query(Exam).filter(Exam.id.in_(exam_ids)).delete(synchronize_session=False)
+
+    db.query(SchoolClass).filter(SchoolClass.teacher_id == teacher.id).delete(synchronize_session=False)
+    db.query(User).filter(User.managed_by_teacher_id == teacher.id).update(
+        {User.managed_by_teacher_id: None}, synchronize_session=False
+    )
+    set_teacher_classes(db, teacher, [])
+
+
+def _delete_user_record(db: Session, current_user: User, user: User, force: bool) -> None:
+    if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="不能删除自己的账号")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
     if user.role == UserRole.admin:
-        if _count_other_active_admins(db, user.id) == 0 and user.is_active:
-            raise HTTPException(status_code=400, detail="不能删除最后一名管理员")
         raise HTTPException(status_code=400, detail="不能删除管理员账号")
     _ensure_manage_user(current_user, user)
     if user.role == UserRole.teacher:
-        if (
-            db.query(Exam.id).filter(Exam.created_by == user.id).first()
-            or db.query(TypingText.id).filter(TypingText.teacher_id == user.id).first()
-            or db.query(TypingClassSession.id).filter(TypingClassSession.teacher_id == user.id).first()
-        ):
+        if force:
+            if current_user.role != UserRole.admin:
+                raise HTTPException(status_code=403, detail="仅管理员可强制删除教师")
+            if user.is_active:
+                raise HTTPException(status_code=400, detail="只能强制删除已停用的教师")
+            _purge_teacher_data(db, user)
+        elif _teacher_has_teaching_data(db, user.id):
             raise HTTPException(status_code=400, detail="教师已有教学数据，请禁用账号以保留文章、考试与历史记录")
-        set_teacher_classes(db, user, [])
+        else:
+            set_teacher_classes(db, user, [])
     if user.role == UserRole.student:
-        for session in user.exam_sessions:
+        for session in list(user.exam_sessions):
             db.delete(session)
         db.query(TypingRecord).filter(TypingRecord.student_id == user.id).delete(synchronize_session=False)
         db.flush()
     db.delete(user)
+
+
+@router.get("/{user_id}/panel")
+def student_panel(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    student = db.query(User).filter(User.id == user_id, User.role == UserRole.student).first()
+    if not student or not student_in_scope(current_user, student):
+        raise HTTPException(status_code=404, detail="学生不存在")
+    records = (
+        db.query(TypingRecord)
+        .options(joinedload(TypingRecord.student), joinedload(TypingRecord.text), joinedload(TypingRecord.typing_session))
+        .filter(TypingRecord.student_id == student.id)
+        .order_by(TypingRecord.id.desc())
+        .limit(200)
+        .all()
+    )
+    sessions = (
+        db.query(ExamSession)
+        .options(joinedload(ExamSession.exam))
+        .filter(ExamSession.student_id == student.id)
+        .order_by(ExamSession.id.desc())
+        .all()
+    )
+    if current_user.role == UserRole.teacher:
+        records = [
+            record for record in records
+            if (record.text is None or record.text.teacher_id in (None, current_user.id))
+            and (record.typing_session is None or record.typing_session.teacher_id == current_user.id)
+        ]
+        sessions = [session for session in sessions if session.exam and session.exam.created_by == current_user.id]
+    practice = [record for record in records if record.source == "practice"]
+    tests = [record for record in records if record.source in ("test", "class_test")]
+    exam_typing = [record for record in records if record.source == "exam"]
+    return {
+        "student": {
+            "id": student.id,
+            "username": student.username,
+            "name": student.name,
+            "class_name": student.class_name or "",
+            "is_active": bool(student.is_active),
+            "is_online": _is_online(student.last_seen_at),
+            "last_seen_at": student.last_seen_at,
+        },
+        "summary": {
+            "practice_count": len(practice),
+            "test_count": len(tests),
+            "exam_count": len(sessions),
+            "avg_wpm": round(sum(record.wpm for record in practice) / len(practice), 1) if practice else 0,
+            "avg_accuracy": round(sum(record.accuracy for record in practice) / len(practice), 1) if practice else 0,
+            "best_wpm": max((record.wpm for record in records), default=0),
+        },
+        "practice_records": [_record_to_out(record).model_dump(mode="json") for record in practice],
+        "test_records": [_record_to_out(record).model_dump(mode="json") for record in tests],
+        "exam_typing_records": [_record_to_out(record).model_dump(mode="json") for record in exam_typing],
+        "exams": [
+            {
+                "id": session.id,
+                "exam_title": session.exam.title if session.exam else "",
+                "status": session.status.value if session.status else "",
+                "total_score": session.total_score,
+                "max_score": session.max_score,
+                "pass_score": session.exam.pass_score if session.exam else 0,
+                "start_time": session.start_time,
+                "submit_time": session.submit_time,
+            }
+            for session in sessions
+        ],
+    }
+
+
+@router.post("/batch-delete")
+def batch_delete_users(
+    data: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    deleted = 0
+    errors: list[str] = []
+    for user_id in dict.fromkeys(data.user_ids):
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            errors.append(f"账号 {user_id} 不存在")
+            continue
+        nested = db.begin_nested()
+        try:
+            _delete_user_record(db, current_user, user, data.force)
+            nested.commit()
+            deleted += 1
+        except HTTPException as exc:
+            nested.rollback()
+            errors.append(f"{user.name}：{exc.detail}")
+    db.commit()
+    return {"deleted": deleted, "errors": errors}
+
+
+@router.delete("/{user_id}")
+def delete_user(
+    user_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    _delete_user_record(db, current_user, user, force)
     db.commit()
     return {"message": "删除成功"}

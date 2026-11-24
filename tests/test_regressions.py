@@ -32,6 +32,8 @@ class RegressionTests(unittest.TestCase):
         self.student = User(username="student", name="学生", password_hash="unused", role="student", class_name="1班")
         self.db.add_all([self.teacher, self.other, self.student])
         self.db.commit()
+        self.student.managed_by_teacher_id = self.teacher.id
+        self.db.commit()
         self.current = self.teacher
         for dependency in (get_current_user, require_student, require_teacher):
             app.dependency_overrides[dependency] = lambda: self.current
@@ -85,6 +87,46 @@ class RegressionTests(unittest.TestCase):
         response = self.client.put(f"/api/exams/{exam['id']}", json={"status": "published", "questions": []})
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(self.client.get(f"/api/exams/{exam['id']}").json()['status'], 'draft')
+
+    def test_teachers_and_students_only_see_bound_published_work(self):
+        exam = self.exam()
+        self.client.post(f"/api/exams/{exam['id']}/publish")
+        text = TypingText(teacher_id=self.teacher.id, title="甲的文章", content="甲的正文", char_count=4, is_active=True)
+        other_text = TypingText(teacher_id=self.other.id, title="乙的文章", content="乙的正文", char_count=4, is_active=True)
+        self.db.add_all([text, other_text])
+        self.db.flush()
+        own_session = TypingClassSession(teacher_id=self.teacher.id, text_id=text.id, class_name="1班", status="active")
+        other_session = TypingClassSession(teacher_id=self.other.id, text_id=other_text.id, class_name="1班", status="active")
+        self.db.add_all([own_session, other_session])
+        self.db.commit()
+
+        self.current = self.other
+        titles = [item["title"] for item in self.client.get("/api/exams").json()]
+        self.assertNotIn("测试", titles)
+        self.assertEqual(self.client.get(f"/api/exams/{exam['id']}").status_code, 403)
+        self.assertEqual(self.client.post(f"/api/exams/{exam['id']}/end").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/stats/exam/{exam['id']}").status_code, 403)
+        self.assertTrue(all(item["teacher_id"] == self.other.id for item in self.client.get("/api/typing/sessions").json()))
+        self.assertNotIn(own_session.id, [item["id"] for item in self.client.get("/api/typing/sessions").json()])
+
+        self.current = self.student
+        visible = self.client.get("/api/exams").json()
+        self.assertEqual([item["id"] for item in visible], [exam["id"]])
+        self.assertEqual(self.client.get("/api/typing/sessions/active").json()["id"], own_session.id)
+        self.assertEqual([item["title"] for item in self.client.get("/api/typing/texts").json()], ["甲的文章"])
+
+        self.student.managed_by_teacher_id = None
+        self.db.commit()
+        self.assertEqual(self.client.get("/api/exams").json(), [])
+        self.assertIsNone(self.client.get("/api/typing/sessions/active").json())
+        self.assertEqual(self.client.post(f"/api/exams/{exam['id']}/start").status_code, 404)
+        self.assertEqual(self.client.post("/api/typing/submit", json={"typing_session_id": own_session.id, "reference_text": "甲的正文", "typed_text": "甲的正文", "duration_seconds": 60}).status_code, 403)
+
+        self.student.managed_by_teacher_id = self.other.id
+        self.db.commit()
+        self.assertEqual(self.client.get("/api/exams").json(), [])
+        self.assertEqual(self.client.get("/api/typing/sessions/active").json()["teacher_id"], self.other.id)
+        self.assertEqual([item["title"] for item in self.client.get("/api/typing/texts").json()], ["乙的文章"])
 
     def test_other_teacher_cannot_control_session(self):
         session = self.typing_session()
@@ -150,6 +192,64 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         for model in (Answer, ExamSession, TypingRecord):
             self.assertEqual(self.db.query(model).count(), 0)
+
+    def test_admin_can_batch_classes_and_force_delete_disabled_teacher(self):
+        admin = User(username="admin", name="管理员", password_hash="unused", role="admin")
+        self.db.add(admin)
+        self.db.commit()
+        self.current = admin
+        created = self.client.post('/api/classes/batch', json={"names": ["甲班", "乙班", "甲班"]})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["created"], ["甲班", "乙班"])
+        removed = self.client.post('/api/classes/batch-delete', json={"names": ["甲班", "乙班"]})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.json()["deleted"], ["甲班", "乙班"])
+        self.typing_session()
+        teacher_id = self.teacher.id
+        student_id = self.student.id
+        self.student.managed_by_teacher_id = self.teacher.id
+        self.teacher.is_active = True
+        self.db.commit()
+        blocked = self.client.delete(f'/api/users/{self.teacher.id}?force=true')
+        self.assertEqual(blocked.status_code, 400, blocked.text)
+        self.teacher.is_active = False
+        self.db.commit()
+        forced = self.client.delete(f'/api/users/{self.teacher.id}?force=true')
+        self.assertEqual(forced.status_code, 200, forced.text)
+        self.db.expire_all()
+        self.assertIsNone(self.db.get(User, teacher_id))
+        self.assertIsNone(self.db.get(User, student_id).managed_by_teacher_id)
+        self.assertEqual(self.db.query(TypingClassSession).count(), 0)
+
+    def test_student_panel_includes_practice_and_exams(self):
+        self.db.add(TypingRecord(student_id=self.student.id, reference_text="日常", source="practice", wpm=30, accuracy=98, score=80))
+        self.db.add(TypingRecord(student_id=self.student.id, reference_text="测试", source="class_test", wpm=20, accuracy=90, score=60))
+        exam = self.exam()
+        self.db.add(ExamSession(exam_id=exam["id"], student_id=self.student.id, status="submitted", total_score=10, max_score=10))
+        self.db.commit()
+        response = self.client.get(f'/api/users/{self.student.id}/panel')
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["summary"]["practice_count"], 1)
+        self.assertEqual(body["summary"]["test_count"], 1)
+        self.assertEqual(body["summary"]["exam_count"], 1)
+        self.assertEqual(body["exams"][0]["exam_title"], "测试")
+        records = self.client.get('/api/typing/records', params={"student_id": self.student.id})
+        self.assertEqual(records.status_code, 200, records.text)
+        self.assertEqual(len(records.json()), 2)
+
+    def test_batch_delete_students(self):
+        admin = User(username="admin2", name="管理员", password_hash="unused", role="admin")
+        extra = User(username="extra", name="另一学生", password_hash="unused", role="student", class_name="1班")
+        self.db.add_all([admin, extra])
+        self.db.commit()
+        self.current = admin
+        student_id = self.student.id
+        response = self.client.post('/api/users/batch-delete', json={"user_ids": [student_id, extra.id], "force": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["deleted"], 2)
+        self.db.expire_all()
+        self.assertIsNone(self.db.get(User, student_id))
 
     def test_delete_teacher_with_resources_is_rejected(self):
         self.typing_session()
@@ -343,7 +443,7 @@ class RegressionTests(unittest.TestCase):
         response = self.client.get('/api/typing/sessions')
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()[0]['id'], session.id)
-        self.assertEqual(response.json()[0]['participant_count'], 0)
+        self.assertEqual(response.json()[0]['participant_count'], 1)
 
     def test_static_route_cannot_escape_dist(self):
         response = self.client.get('/%2e%2e/secret.txt')

@@ -77,15 +77,19 @@ export const authApi = {
 export const classApi = {
   list: () => api.get('/classes'),
   create: (data) => api.post('/classes', data),
+  createBatch: (data) => api.post('/classes/batch', data),
   update: (data) => api.put('/classes', data),
   delete: (name) => api.delete('/classes', { params: { name } }),
+  deleteBatch: (names) => api.post('/classes/batch-delete', { names }),
 }
 
 export const userApi = {
   list: (params) => api.get('/users', { params }),
   create: (data) => api.post('/users', data),
   update: (id, data) => api.put(`/users/${id}`, data),
-  delete: (id) => api.delete(`/users/${id}`),
+  delete: (id, force = false) => api.delete(`/users/${id}`, { params: { force } }),
+  batchDelete: (userIds, force = false) => api.post('/users/batch-delete', { user_ids: userIds, force }),
+  panel: (id) => api.get(`/users/${id}/panel`),
 }
 
 export const importApi = {

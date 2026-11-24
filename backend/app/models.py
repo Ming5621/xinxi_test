@@ -171,7 +171,7 @@ class Answer(Base):
 
 
 class TypingText(Base):
-    """打字练习素材库（归属创建教师，按班级对学生可见）"""
+    """打字练习素材库（归属创建教师，只对绑定该教师的学生可见）"""
     __tablename__ = "typing_texts"
 
     id = Column(Integer, primary_key=True, index=True)

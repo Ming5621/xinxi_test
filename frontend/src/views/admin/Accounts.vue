@@ -26,6 +26,12 @@
         <el-button @click="packFileRef?.click()">导入数据包</el-button>
         <input ref="packFileRef" type="file" accept=".json,application/json" class="hidden-file" @change="handleImportPack" />
         <el-button @click="importVisible = true">批量导入学生</el-button>
+        <el-button type="danger" plain :disabled="!selectedStudents.length" @click="deleteSelectedStudents">
+          批量删除学生
+        </el-button>
+        <el-button type="danger" plain :disabled="!selectedDisabledTeachers.length" @click="forceDeleteTeachers">
+          强制删除已停用教师
+        </el-button>
         <el-button type="primary" @click="showDialog()">
           <el-icon><Plus /></el-icon> 添加账号
         </el-button>
@@ -34,7 +40,8 @@
         共 {{ users.length }} 个账号（管理员 {{ counts.admin }}，教师 {{ counts.teacher }}，学生 {{ counts.student }}）
       </p>
 
-      <el-table :data="filteredUsers" stripe v-loading="loading">
+      <el-table :data="filteredUsers" stripe v-loading="loading" row-key="id" @selection-change="selected = $event">
+        <el-table-column type="selection" width="48" :selectable="(row) => row.role !== 'admin' && row.id !== auth.user?.id" />
         <el-table-column prop="username" label="用户名" min-width="150" />
         <el-table-column label="姓名" width="140">
           <template #default="{ row }">
@@ -198,6 +205,7 @@ const importVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
 const packFileRef = ref()
+const selected = ref([])
 const form = ref(emptyForm())
 
 const rules = {
@@ -237,6 +245,8 @@ const filteredUsers = computed(() => {
 })
 
 const teachers = computed(() => users.value.filter((user) => user.role === 'teacher'))
+const selectedStudents = computed(() => selected.value.filter((user) => user.role === 'student'))
+const selectedDisabledTeachers = computed(() => selected.value.filter((user) => user.role === 'teacher' && !user.is_active))
 const eligibleTeachers = computed(() => teachers.value.filter((teacher) =>
   teacher.id === form.value.managed_by_teacher_id
   || (teacher.is_active && teacher.assigned_classes.includes(form.value.class_name))
@@ -372,12 +382,48 @@ async function handleSave() {
 }
 
 async function handleDelete(row) {
-  const label = roleLabel(row.role)
-  const related = row.role === 'student' ? '及其考试、打字记录' : ''
-  await ElMessageBox.confirm(`确定删除${label}「${row.name}」${related}吗？此操作不可恢复。`, '警告', { type: 'warning' })
-  await userApi.delete(row.id)
+  const force = row.role === 'teacher' && !row.is_active
+  const message = force
+    ? `「${row.name}」已停用。强制删除会同时删除其考试、练习文章和课堂测试，学生账号保留并解除绑定。此操作不可恢复。`
+    : `确定删除${roleLabel(row.role)}「${row.name}」${row.role === 'student' ? '及其考试、打字记录' : ''}吗？此操作不可恢复。`
+  await ElMessageBox.confirm(message, force ? '强制删除教师' : '警告', { type: 'warning' })
+  await userApi.delete(row.id, force)
   ElMessage.success('删除成功')
   await loadUsers()
+}
+
+async function reportBatch(result, successText) {
+  await loadUsers()
+  selected.value = []
+  if (result?.errors?.length) {
+    await ElMessageBox.alert([`${successText} ${result.deleted || 0} 个`, ...result.errors].join('\n'), '删除结果')
+  } else {
+    ElMessage.success(`${successText} ${result?.deleted || 0} 个`)
+  }
+}
+
+async function deleteSelectedStudents() {
+  const rows = selectedStudents.value
+  if (!rows.length) return
+  await ElMessageBox.confirm(
+    `将强制删除 ${rows.length} 名学生及其考试成绩、打字记录。此操作不可恢复。`,
+    '批量删除学生',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+  )
+  const result = await userApi.batchDelete(rows.map((row) => row.id), true)
+  await reportBatch(result, '已删除学生')
+}
+
+async function forceDeleteTeachers() {
+  const rows = selectedDisabledTeachers.value
+  if (!rows.length) return
+  await ElMessageBox.confirm(
+    `将强制删除 ${rows.length} 名已停用教师，以及他们的考试、练习文章和课堂测试。学生账号会保留，并解除与这些教师的绑定。`,
+    '强制删除已停用教师',
+    { type: 'warning', confirmButtonText: '强制删除', cancelButtonText: '取消' },
+  )
+  const result = await userApi.batchDelete(rows.map((row) => row.id), true)
+  await reportBatch(result, '已强制删除教师')
 }
 
 async function loadUsers() {

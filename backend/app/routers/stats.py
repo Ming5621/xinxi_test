@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import require_teacher
 from ..database import get_db
 from ..models import Exam, ExamSession, SessionStatus, User, UserRole
-from ..permissions import apply_student_scope, filter_class_name, student_in_scope
+from ..permissions import apply_student_scope, ensure_owns_exam, filter_class_name, student_in_scope
 from ..schemas import ClassExamStat, DashboardStats, ExamStatistics, QuestionStat
 from ..timeutil import utc_now
 
@@ -48,12 +48,16 @@ def dashboard_stats(db: Session = Depends(get_db), current_user: User = Depends(
         .filter(ExamSession.status == SessionStatus.submitted)
     )
     session_q = apply_student_scope(session_q, current_user)
+    exam_q = db.query(Exam)
+    if current_user.role == UserRole.teacher:
+        exam_q = exam_q.filter(Exam.created_by == current_user.id)
+        session_q = session_q.join(Exam, ExamSession.exam_id == Exam.id).filter(Exam.created_by == current_user.id)
 
     return DashboardStats(
         total_students=student_q.count(),
         online_students=online_q.count(),
-        total_exams=db.query(Exam).count(),
-        active_exams=db.query(Exam).filter(Exam.status == ExamStatus.published).count(),
+        total_exams=exam_q.count(),
+        active_exams=exam_q.filter(Exam.status == ExamStatus.published).count(),
         completed_sessions=session_q.count(),
     )
 
@@ -67,8 +71,7 @@ def exam_statistics(
 ):
     class_name = filter_class_name(current_user, class_name)
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
 
     sessions = (
         db.query(ExamSession)

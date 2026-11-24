@@ -31,7 +31,7 @@
         </div>
       </div>
 
-      <el-table :data="filteredStudents" stripe v-loading="loading">
+      <el-table :data="filteredStudents" stripe v-loading="loading" class="student-table" @row-click="openPanel">
         <el-table-column prop="username" label="账号编号" width="140" sortable />
         <el-table-column prop="name" label="姓名（登录名）" width="140" sortable />
         <el-table-column prop="class_name" label="班级" width="140" sortable />
@@ -53,11 +53,12 @@
         <el-table-column label="最近活跃" width="180">
           <template #default="{ row }">{{ formatLastSeen(row.last_seen_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="showDialog(row)">编辑</el-button>
-            <el-button link type="warning" @click="handleResetPassword(row)">重置密码</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+            <el-button link type="primary" @click.stop="openPanel(row)">数据</el-button>
+            <el-button link type="primary" @click.stop="showDialog(row)">编辑</el-button>
+            <el-button link type="warning" @click.stop="handleResetPassword(row)">重置密码</el-button>
+            <el-button link type="danger" @click.stop="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -82,6 +83,77 @@
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="panelVisible" :title="panelTitle" size="720px">
+      <div v-loading="panelLoading">
+        <template v-if="panel">
+          <p class="panel-meta">
+            {{ panel.student.class_name || '未分班' }} · {{ panel.student.is_online ? '在线' : '离线' }}
+            · 最近活跃 {{ formatLastSeen(panel.student.last_seen_at) }}
+          </p>
+          <div class="panel-summary">
+            <div><strong>{{ panel.summary.practice_count }}</strong><span>日常练习</span></div>
+            <div><strong>{{ panel.summary.test_count }}</strong><span>测试</span></div>
+            <div><strong>{{ panel.summary.exam_count }}</strong><span>考试</span></div>
+            <div><strong>{{ panel.summary.avg_wpm }}</strong><span>练习均速</span></div>
+            <div><strong>{{ panel.summary.avg_accuracy }}%</strong><span>练习准确率</span></div>
+            <div><strong>{{ panel.summary.best_wpm }}</strong><span>最佳速度</span></div>
+          </div>
+          <el-tabs>
+            <el-tab-pane :label="`日常练习 ${panel.practice_records.length}`">
+              <el-table :data="panel.practice_records" stripe size="small" empty-text="暂无日常练习" max-height="420">
+                <el-table-column prop="text_title" label="文章" min-width="140" />
+                <el-table-column prop="score" label="评分" width="70" />
+                <el-table-column prop="wpm" label="速度" width="90" />
+                <el-table-column prop="accuracy" label="准确率" width="80" />
+                <el-table-column prop="level" label="等级" width="80" />
+                <el-table-column label="时间" width="160">
+                  <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+                </el-table-column>
+              </el-table>
+            </el-tab-pane>
+            <el-tab-pane :label="`测试 ${panel.test_records.length}`">
+              <el-table :data="panel.test_records" stripe size="small" empty-text="暂无测试记录" max-height="420">
+                <el-table-column prop="text_title" label="文章" min-width="140" />
+                <el-table-column label="类型" width="100">
+                  <template #default="{ row }">{{ row.source === 'class_test' ? '课堂测试' : '5分钟测试' }}</template>
+                </el-table-column>
+                <el-table-column prop="score" label="评分" width="70" />
+                <el-table-column prop="wpm" label="速度" width="90" />
+                <el-table-column prop="accuracy" label="准确率" width="80" />
+                <el-table-column label="时间" width="160">
+                  <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+                </el-table-column>
+              </el-table>
+            </el-tab-pane>
+            <el-tab-pane :label="`考试 ${panel.exams.length}`">
+              <el-table :data="panel.exams" stripe size="small" empty-text="暂无考试记录" max-height="280">
+                <el-table-column prop="exam_title" label="考试" min-width="160" />
+                <el-table-column label="状态" width="90">
+                  <template #default="{ row }">{{ row.status === 'submitted' ? '已提交' : '答题中' }}</template>
+                </el-table-column>
+                <el-table-column label="得分" width="110">
+                  <template #default="{ row }">{{ row.total_score }} / {{ row.max_score }}</template>
+                </el-table-column>
+                <el-table-column label="提交时间" width="160">
+                  <template #default="{ row }">{{ formatDateTime(row.submit_time, '未提交') }}</template>
+                </el-table-column>
+              </el-table>
+              <h4 v-if="panel.exam_typing_records.length" class="exam-typing-title">考试中的打字题</h4>
+              <el-table v-if="panel.exam_typing_records.length" :data="panel.exam_typing_records" stripe size="small" max-height="220">
+                <el-table-column prop="text_title" label="文章" min-width="140" />
+                <el-table-column prop="score" label="评分" width="70" />
+                <el-table-column prop="wpm" label="速度" width="90" />
+                <el-table-column prop="accuracy" label="准确率" width="80" />
+                <el-table-column label="时间" width="160">
+                  <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+                </el-table-column>
+              </el-table>
+            </el-tab-pane>
+          </el-tabs>
+        </template>
+      </div>
+    </el-drawer>
 
     <BatchImportDialog
       v-model="importVisible"
@@ -127,6 +199,9 @@ const importVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
 const packFileRef = ref()
+const panelVisible = ref(false)
+const panelLoading = ref(false)
+const panel = ref(null)
 const form = ref({ name: '', class_name: '', password: '' })
 
 const rules = {
@@ -142,6 +217,7 @@ const filteredStudents = computed(() => {
 })
 
 const onlineCount = computed(() => students.value.filter((s) => s.is_online).length)
+const panelTitle = computed(() => panel.value ? `${panel.value.student.name} 的学习数据` : '学生学习数据')
 
 let refreshTimer = null
 
@@ -202,6 +278,17 @@ async function handleDelete(row) {
   await userApi.delete(row.id)
   ElMessage.success('删除成功')
   await loadStudents()
+}
+
+async function openPanel(row) {
+  panelVisible.value = true
+  panelLoading.value = true
+  panel.value = null
+  try {
+    panel.value = await userApi.panel(row.id)
+  } finally {
+    panelLoading.value = false
+  }
 }
 
 async function loadStudents() {
@@ -327,5 +414,43 @@ onUnmounted(() => {
 
 .hidden-file {
   display: none;
+}
+
+.student-table :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.panel-meta {
+  margin: 0 0 12px;
+  color: #6b7280;
+}
+
+.panel-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.panel-summary div {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.panel-summary strong {
+  display: block;
+  font-size: 18px;
+}
+
+.panel-summary span,
+.exam-typing-title {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.exam-typing-title {
+  margin: 16px 0 8px;
+  font-size: 14px;
 }
 </style>

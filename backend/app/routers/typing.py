@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import get_current_user, require_student, require_teacher
@@ -22,7 +23,6 @@ from ..permissions import (
     ensure_class_access,
     filter_class_name,
     student_in_scope,
-    teacher_ids_for_class,
 )
 from ..schemas import (
     TypingClassSessionCreate,
@@ -74,7 +74,14 @@ def _text_to_out(text: TypingText) -> TypingTextOut:
 
 
 def _student_visible_teacher_ids(db: Session, student: User) -> list[int]:
-    return teacher_ids_for_class(db, student.class_name or "")
+    """学生只能使用绑定教师发布的练习文章和测试。"""
+    teacher_id = student.managed_by_teacher_id
+    if not teacher_id:
+        return []
+    teacher = db.get(User, teacher_id)
+    if not teacher or teacher.role != UserRole.teacher or not teacher.is_active:
+        return []
+    return [teacher.id]
 
 
 @router.get("/texts", response_model=list[TypingTextOut])
@@ -83,7 +90,7 @@ def list_texts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """练习素材按教师账号隔离：教师看自己的；学生看管理其班级的教师素材。"""
+    """练习素材按教师账号隔离：教师看自己的；学生只看绑定教师的素材。"""
     query = (
         db.query(TypingText)
         .options(joinedload(TypingText.teacher))
@@ -303,8 +310,8 @@ def _session_to_out(session: TypingClassSession, db: Session) -> TypingClassSess
         db.query(User)
         .filter(User.role == UserRole.student, User.class_name == session.class_name, User.is_active == True)
     )
-    if session.teacher:
-        participant_query = apply_student_scope(participant_query, session.teacher)
+    if session.teacher_id:
+        participant_query = participant_query.filter(User.managed_by_teacher_id == session.teacher_id)
     else:
         participant_query = participant_query.filter(False)
     participant_count = participant_query.count()
@@ -356,10 +363,11 @@ def active_session_for_student(
         .filter(
             TypingClassSession.class_name == current_user.class_name,
             TypingClassSession.status == TypingClassSessionStatus.active,
+            TypingClassSession.teacher_id == current_user.managed_by_teacher_id,
         )
     )
-    if current_user.managed_by_teacher_id:
-        query = query.filter(TypingClassSession.teacher_id == current_user.managed_by_teacher_id)
+    if not current_user.managed_by_teacher_id:
+        return None
     session = query.order_by(TypingClassSession.id.desc()).first()
     if not session:
         return None
@@ -383,7 +391,7 @@ def session_detail(
     if current_user.role == UserRole.student:
         if (
             session.class_name != current_user.class_name
-            or current_user.managed_by_teacher_id not in (None, session.teacher_id)
+            or current_user.managed_by_teacher_id != session.teacher_id
         ):
             raise HTTPException(status_code=403, detail="无权查看")
     elif current_user.role == UserRole.teacher and session.teacher_id != current_user.id:
@@ -423,6 +431,7 @@ def create_session(
     active = (
         db.query(TypingClassSession)
         .filter(
+            TypingClassSession.teacher_id == current_user.id,
             TypingClassSession.class_name == data.class_name,
             TypingClassSession.status == TypingClassSessionStatus.active,
         )
@@ -471,6 +480,7 @@ def start_session(
     if session.status != TypingClassSessionStatus.pending:
         raise HTTPException(status_code=400, detail="测试状态不允许开始")
     active = db.query(TypingClassSession).filter(
+        TypingClassSession.teacher_id == session.teacher_id,
         TypingClassSession.class_name == session.class_name,
         TypingClassSession.status == TypingClassSessionStatus.active,
     ).first()
@@ -523,7 +533,7 @@ def submit_typing(
             raise HTTPException(status_code=404, detail="课堂测试不存在")
         if (
             typing_session.class_name != current_user.class_name
-            or current_user.managed_by_teacher_id not in (None, typing_session.teacher_id)
+            or current_user.managed_by_teacher_id != typing_session.teacher_id
         ):
             raise HTTPException(status_code=403, detail="无权参加该测试")
         if typing_session.status != TypingClassSessionStatus.active:
@@ -589,6 +599,21 @@ def submit_typing(
         passed=passed,
         score=score,
         remark=remark,
+    )
+
+
+def _limit_teacher_typing_records(query, teacher: User, db: Session):
+    """教师只看自己文章、自己发起的测试，以及没有归属的自由练习。"""
+    if teacher.role != UserRole.teacher:
+        return query
+    own_texts = db.query(TypingText.id).filter(TypingText.teacher_id == teacher.id)
+    own_sessions = db.query(TypingClassSession.id).filter(TypingClassSession.teacher_id == teacher.id)
+    return query.filter(
+        or_(
+            and_(TypingRecord.text_id.is_(None), TypingRecord.typing_session_id.is_(None)),
+            TypingRecord.text_id.in_(own_texts),
+            TypingRecord.typing_session_id.in_(own_sessions),
+        )
     )
 
 
@@ -658,6 +683,7 @@ def list_records(
     else:
         visible_ids = [u.id for u in apply_student_scope(db.query(User), current_user, class_name).all()]
         query = query.filter(TypingRecord.student_id.in_(visible_ids or [-1]))
+    query = _limit_teacher_typing_records(query, current_user, db)
     return [_record_to_out(r) for r in query.limit(limit).all()]
 
 
@@ -674,7 +700,7 @@ def class_stats(
     stats = []
     for s in students:
         records = (
-            db.query(TypingRecord)
+            _limit_teacher_typing_records(db.query(TypingRecord), current_user, db)
             .filter(TypingRecord.student_id == s.id)
             .order_by(TypingRecord.id.desc())
             .limit(20)
@@ -693,7 +719,11 @@ def class_stats(
             latest_level = get_typing_level(
                 latest.wpm, latest.accuracy, DEFAULT_TYPING_CONFIG["min_accuracy"]
             )["level"]
-            total_count = db.query(TypingRecord).filter(TypingRecord.student_id == s.id).count()
+            total_count = (
+                _limit_teacher_typing_records(db.query(TypingRecord), current_user, db)
+                .filter(TypingRecord.student_id == s.id)
+                .count()
+            )
         else:
             avg_wpm = best_wpm = avg_acc = avg_score = 0
             latest_level = "—"

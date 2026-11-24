@@ -20,7 +20,7 @@ from ..models import (
     User,
     UserRole,
 )
-from ..permissions import apply_student_scope, ensure_class_access, filter_class_name, student_in_scope
+from ..permissions import apply_student_scope, ensure_class_access, ensure_owns_exam, filter_class_name, student_in_scope
 from ..sync_pack import build_teacher_pack, pack_filename
 from ..timeutil import format_local
 from ..typing_utils import DEFAULT_TYPING_CONFIG, get_typing_level, score_typing_question
@@ -108,8 +108,7 @@ def export_exam_results(
 ):
     class_name = filter_class_name(current_user, class_name)
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
 
     sessions = (
         db.query(ExamSession)
@@ -287,9 +286,12 @@ def export_typing_session(
     )
     by_student = {record.student_id: record for record in records}
     students = (
-        apply_student_scope(db.query(User), current_user, session.class_name)
+        db.query(User)
         .filter(
+            User.role == UserRole.student,
             User.is_active == True,
+            User.class_name == session.class_name,
+            User.managed_by_teacher_id == session.teacher_id,
         )
         .order_by(User.name, User.id)
         .all()
@@ -297,7 +299,7 @@ def export_typing_session(
     known_ids = {student.id for student in students}
     extras = [
         record.student for record in records
-        if record.student_id not in known_ids and student_in_scope(current_user, record.student)
+        if record.student and record.student_id not in known_ids
     ]
 
     title = session.title or "课堂打字测试"

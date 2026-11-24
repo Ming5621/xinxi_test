@@ -14,8 +14,9 @@ from ..models import (
     QuestionType,
     SessionStatus,
     User,
+    UserRole,
 )
-from ..permissions import filter_class_name, student_in_scope
+from ..permissions import ensure_owns_exam, filter_class_name, student_can_access_exam, student_in_scope
 from ..import_utils import normalize_answer
 from ..typing_utils import compare_text, calculate_wpm, parse_typing_config, score_typing_question, get_typing_level
 from ..schemas import (
@@ -112,8 +113,15 @@ def list_exams(
     current_user: User = Depends(get_current_user),
 ):
     query = db.query(Exam)
-    if current_user.role.value == "student":
-        query = query.filter(Exam.status.in_([ExamStatus.published, ExamStatus.ended]))
+    if current_user.role == UserRole.teacher:
+        query = query.filter(Exam.created_by == current_user.id)
+    elif current_user.role == UserRole.student:
+        if not current_user.managed_by_teacher_id:
+            return []
+        query = query.filter(
+            Exam.created_by == current_user.managed_by_teacher_id,
+            Exam.status.in_([ExamStatus.published, ExamStatus.ended]),
+        )
     return [_exam_to_out(e) for e in query.order_by(Exam.id.desc()).all()]
 
 
@@ -160,8 +168,11 @@ def get_exam(
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
-    if current_user.role.value == "student" and exam.status not in (ExamStatus.published, ExamStatus.ended):
-        raise HTTPException(status_code=404, detail="考试不存在")
+    if current_user.role == UserRole.student:
+        if not student_can_access_exam(current_user, exam) or exam.status not in (ExamStatus.published, ExamStatus.ended):
+            raise HTTPException(status_code=404, detail="考试不存在")
+    else:
+        ensure_owns_exam(current_user, exam)
     out = _exam_to_out(exam)
     if current_user.role.value == "student":
         # 返回题目内容但不含标准答案，避免前端只读 get 接口时看不到题
@@ -182,11 +193,10 @@ def update_exam(
     exam_id: int,
     data: ExamUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
 
     # 已有答卷引用题目 ID；替换题目会使历史答案错配或失去关联。
     if exam.sessions and (
@@ -250,21 +260,19 @@ def update_exam(
 def delete_exam(
     exam_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher),
+    current_user: User = Depends(require_teacher),
 ):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
     db.delete(exam)
     db.commit()
     return {"message": "删除成功"}
 
 
 @router.post("/{exam_id}/publish")
-def publish_exam(exam_id: int, db: Session = Depends(get_db), _: User = Depends(require_teacher)):
+def publish_exam(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_teacher)):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
     if not exam.questions:
         raise HTTPException(status_code=400, detail="考试没有题目，无法发布")
     exam.status = ExamStatus.published
@@ -274,10 +282,9 @@ def publish_exam(exam_id: int, db: Session = Depends(get_db), _: User = Depends(
 
 
 @router.post("/{exam_id}/end")
-def end_exam(exam_id: int, db: Session = Depends(get_db), _: User = Depends(require_teacher)):
+def end_exam(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_teacher)):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
     exam.status = ExamStatus.ended
     exam.end_time = datetime.utcnow()
     _grade_in_progress_sessions(exam_id, db)
@@ -293,7 +300,7 @@ def start_exam(
     current_user: User = Depends(require_student),
 ):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
+    if not exam or not student_can_access_exam(current_user, exam):
         raise HTTPException(status_code=404, detail="考试不存在")
     if exam.status != ExamStatus.published:
         raise HTTPException(status_code=400, detail="考试未开放")
@@ -354,7 +361,7 @@ def get_exam_questions(
     current_user: User = Depends(require_student),
 ):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
+    if not exam or not student_can_access_exam(current_user, exam):
         raise HTTPException(status_code=404, detail="考试不存在")
     if exam.status != ExamStatus.published:
         raise HTTPException(status_code=400, detail="考试未开放")
@@ -384,7 +391,7 @@ def submit_exam(
     current_user: User = Depends(require_student),
 ):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
+    if not exam or not student_can_access_exam(current_user, exam):
         raise HTTPException(status_code=404, detail="考试不存在")
 
     if exam.status != ExamStatus.published:
@@ -570,8 +577,7 @@ def list_exam_sessions(
 ):
     class_name = filter_class_name(current_user, class_name)
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
+    ensure_owns_exam(current_user, exam)
     sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
     result = []
     for s in sessions:

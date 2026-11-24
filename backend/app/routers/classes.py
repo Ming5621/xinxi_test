@@ -20,6 +20,15 @@ class ClassUpdate(ClassCreate):
     original_name: str
 
 
+class ClassBatchCreate(BaseModel):
+    names: list[str] = Field(min_length=1, max_length=200)
+    teacher_ids: list[int] | None = None
+
+
+class ClassBatchDelete(BaseModel):
+    names: list[str] = Field(min_length=1, max_length=200)
+
+
 @router.get("")
 def list_classes(
     db: Session = Depends(get_db),
@@ -87,12 +96,7 @@ def update_class(
     return _save_class(data, db, current_user, data.original_name)
 
 
-@router.delete("")
-def delete_class(
-    name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
+def _remove_class(name: str, db: Session, current_user: User) -> None:
     if name not in list_accessible_classes(current_user, db):
         raise HTTPException(status_code=404, detail="班级不存在")
 
@@ -113,5 +117,67 @@ def delete_class(
     })
     db.query(SchoolClass).filter_by(name=name).delete()
     db.query(ClassCatalog).filter_by(name=name).delete()
+
+
+@router.post("/batch")
+def create_classes(
+    data: ClassBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    created: list[str] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for raw in data.names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            _save_class(ClassCreate(name=name, teacher_ids=data.teacher_ids), db, current_user)
+        except HTTPException as exc:
+            errors.append(f"{name}：{exc.detail}")
+            continue
+        created.append(name)
+    if not created and not errors:
+        raise HTTPException(status_code=400, detail="请填写班级名称")
+    return {"created": created, "errors": errors, "classes": list_accessible_classes(current_user, db)}
+
+
+@router.post("/batch-delete")
+def delete_classes(
+    data: ClassBatchDelete,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    deleted: list[str] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for raw in data.names:
+        name = str(raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        try:
+            _remove_class(name, db, current_user)
+        except HTTPException as exc:
+            errors.append(f"{name}：{exc.detail}")
+            continue
+        deleted.append(name)
+    if not deleted and not errors:
+        raise HTTPException(status_code=400, detail="请选择要删除的班级")
+    db.commit()
+    return {"deleted": deleted, "errors": errors}
+
+
+@router.delete("")
+def delete_class(
+    name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    _remove_class(name, db, current_user)
     db.commit()
     return {"message": "班级已删除"}

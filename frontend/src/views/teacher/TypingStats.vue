@@ -97,8 +97,8 @@
     <el-dialog v-model="dialogVisible" :title="`${currentStudent?.student_name || ''} 的打字记录`" width="760px">
       <el-table :data="records" stripe v-loading="recordsLoading" max-height="420">
         <el-table-column prop="text_title" label="文章" min-width="140" sortable />
-        <el-table-column prop="source" label="模式" width="100" sortable>
-          <template #default="{ row }">{{ row.source === 'test' ? '5分钟测试' : '自由练习' }}</template>
+        <el-table-column prop="source" label="模式" width="110" sortable>
+          <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
         </el-table-column>
         <el-table-column prop="score" label="评分" width="80" sortable>
           <template #default="{ row }"><strong>{{ row.score }}</strong></template>
@@ -202,6 +202,10 @@ function difficultyLabel(d) {
   return { beginner: '入门', basic: '基础', standard: '达标', advanced: '进阶' }[d] || d
 }
 
+function sourceLabel(source) {
+  return { practice: '自由练习', test: '5分钟测试', class_test: '课堂测试', exam: '考试' }[source] || source
+}
+
 async function loadTexts() {
   textsLoading.value = true
   try {
@@ -260,7 +264,7 @@ async function showRecords(row) {
   dialogVisible.value = true
   recordsLoading.value = true
   try {
-    records.value = await typingApi.records(row.student_id)
+    records.value = await typingApi.records({ student_id: row.student_id })
   } finally {
     recordsLoading.value = false
   }

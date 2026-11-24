@@ -7,10 +7,15 @@
     <div class="content-card">
       <div class="class-toolbar">
         <el-input v-model="search" placeholder="搜索班级" clearable style="max-width: 260px" />
-        <el-button type="primary" @click="showDialog()">新建班级</el-button>
+        <div class="toolbar-actions">
+          <el-button :disabled="!selected.length" :loading="batchDeleting" @click="removeSelected">批量删除</el-button>
+          <el-button @click="batchVisible = true">批量添加</el-button>
+          <el-button type="primary" @click="showDialog()">新建班级</el-button>
+        </div>
       </div>
 
-      <el-table :data="filteredClasses" v-loading="loading" stripe>
+      <el-table :data="filteredClasses" v-loading="loading" stripe row-key="name" @selection-change="selected = $event">
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="班级" min-width="160" />
         <el-table-column label="管理教师" min-width="250">
           <template #default="{ row }">
@@ -30,6 +35,22 @@
         </el-table-column>
       </el-table>
     </div>
+
+    <el-dialog v-model="batchVisible" title="批量添加班级" width="520px" @closed="batchText = ''">
+      <el-input
+        v-model="batchText"
+        type="textarea"
+        :rows="8"
+        placeholder="每行一个班级名称，也可用逗号分隔"
+      />
+      <el-select v-model="batchTeacherIds" multiple filterable clearable placeholder="可选：这些班级绑定的教师" style="width: 100%; margin-top: 12px">
+        <el-option v-for="teacher in teachers" :key="teacher.id" :label="teacherLabel(teacher)" :value="teacher.id" />
+      </el-select>
+      <template #footer>
+        <el-button @click="batchVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="saveBatch">添加</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="visible" :title="originalName ? '编辑班级' : '新建班级'" width="500px">
       <el-form label-width="80px" @submit.prevent="save">
@@ -69,6 +90,12 @@ const saving = ref(false)
 const deleting = ref('')
 const originalName = ref('')
 const form = ref({ name: '', teacher_ids: [] })
+const selected = ref([])
+const batchVisible = ref(false)
+const batchText = ref('')
+const batchTeacherIds = ref([])
+const batchSaving = ref(false)
+const batchDeleting = ref(false)
 
 const filteredClasses = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -87,6 +114,60 @@ function showDialog(row = null) {
 function teacherLabel(teacher) {
   const username = teacher.name === teacher.username ? '' : `（${teacher.username}）`
   return `${teacher.name}${username}${teacher.is_active ? '' : ' · 已禁用'}`
+}
+
+function parseClassNames(text) {
+  return [...new Set(text.split(/[\n,，、;；]+/).map((item) => item.trim()).filter(Boolean))]
+}
+
+async function saveBatch() {
+  const names = parseClassNames(batchText.value)
+  if (!names.length) {
+    ElMessage.warning('请填写班级名称')
+    return
+  }
+  batchSaving.value = true
+  try {
+    const result = await classApi.createBatch({
+      names,
+      teacher_ids: batchTeacherIds.value,
+    })
+    batchVisible.value = false
+    batchTeacherIds.value = []
+    await load()
+    const summary = `已添加 ${result.created?.length || 0} 个班级`
+    if (result.errors?.length) {
+      await ElMessageBox.alert([summary, ...result.errors].join('\n'), '批量添加结果')
+    } else {
+      ElMessage.success(summary)
+    }
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+async function removeSelected() {
+  const names = selected.value.map((row) => row.name)
+  if (!names.length) return
+  const confirmed = await ElMessageBox.confirm(
+    `将删除 ${names.length} 个班级，并解除这些班级的师生分配。学生账号和历史成绩会保留。`,
+    '批量删除班级',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+  ).catch(() => false)
+  if (!confirmed) return
+  batchDeleting.value = true
+  try {
+    const result = await classApi.deleteBatch(names)
+    await load()
+    const summary = `已删除 ${result.deleted?.length || 0} 个班级`
+    if (result.errors?.length) {
+      await ElMessageBox.alert([summary, ...result.errors].join('\n'), '批量删除结果')
+    } else {
+      ElMessage.success(summary)
+    }
+  } finally {
+    batchDeleting.value = false
+  }
 }
 
 async function removeClass(row) {
@@ -142,11 +223,16 @@ onMounted(load)
 </script>
 
 <style scoped>
-.class-toolbar {
+.class-toolbar,
+.toolbar-actions {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.toolbar-actions {
+  margin-bottom: 0;
 }
 
 .teacher-tag {

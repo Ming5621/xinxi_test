@@ -181,3 +181,24 @@ def can_manage_typing_text(user: User, text) -> bool:
     if user.role == UserRole.teacher and text.teacher_id == user.id:
         return True
     return False
+
+
+def ensure_owns_exam(user: User, exam) -> None:
+    """教师只能管理自己发布的考试；管理员可以管理全部。"""
+    if exam is None:
+        raise HTTPException(status_code=404, detail="考试不存在")
+    if user.role == UserRole.admin:
+        return
+    if user.role == UserRole.teacher and exam.created_by == user.id:
+        return
+    raise HTTPException(status_code=403, detail="只能管理自己发布的考试")
+
+
+def student_can_access_exam(student: User, exam) -> bool:
+    """学生只能看到、参加绑定教师发布的考试。"""
+    return bool(
+        student.role == UserRole.student
+        and student.managed_by_teacher_id
+        and exam is not None
+        and exam.created_by == student.managed_by_teacher_id
+    )
