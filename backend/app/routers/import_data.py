@@ -183,15 +183,17 @@ async def parse_questions_file(
 @router.post("/teacher-pack")
 def import_teacher_data(
     payload: dict = Body(...),
+    overwrite: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    return import_teacher_pack(db, current_user, payload)
+    return import_teacher_pack(db, current_user, payload, overwrite=overwrite)
 
 
 @router.post("/teacher-pack/file")
 async def import_teacher_data_file(
     file: UploadFile = File(...),
+    overwrite: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
@@ -202,4 +204,4 @@ async def import_teacher_data_file(
         raise HTTPException(status_code=400, detail="无法解析教师数据包，请使用 UTF-8 JSON")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="教师数据包格式不正确")
-    return import_teacher_pack(db, current_user, payload)
+    return import_teacher_pack(db, current_user, payload, overwrite=overwrite)

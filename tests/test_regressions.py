@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from app.auth import get_current_user, require_student, require_teacher
 from app.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import Answer, ExamSession, TypingClassSession, TypingRecord, TypingText, User
+from app.models import Answer, ExamSession, Question, TypingClassSession, TypingRecord, TypingText, User
 
 
 class RegressionTests(unittest.TestCase):
@@ -233,6 +233,55 @@ class RegressionTests(unittest.TestCase):
         exam = self.client.get('/api/exams').json()[0]
         self.assertEqual(exam['pass_score'], 0)
         self.assertEqual(exam['total_score'], 0)
+
+    def test_pack_does_not_overwrite_until_confirmed(self):
+        self.student.managed_by_teacher_id = self.teacher.id
+        self.db.commit()
+        first = {"format": "xinxi_teacher_pack", "version": 2, "students": [{"username": "student", "name": "新名字", "class_name": "1班"}], "exams": [{"title": "测试", "questions": [{"type": "judge", "content": "新题", "correct_answer": "错误", "score": 5}]}], "typing_texts": [{"title": "文章", "content": "新的正文内容", "time_limit": 60}]}
+        self.exam()
+        self.db.add(TypingText(teacher_id=self.teacher.id, title="文章", content="旧正文", char_count=3))
+        self.db.commit()
+        skipped = self.client.post('/api/import/teacher-pack', json=first)
+        self.assertEqual(skipped.status_code, 200, skipped.text)
+        self.assertEqual(skipped.json()['student_updated'], 0)
+        self.assertTrue(any('未覆盖' in item for item in skipped.json()['errors']))
+        self.db.refresh(self.student)
+        self.assertEqual(self.student.name, '学生')
+        replaced = self.client.post('/api/import/teacher-pack?overwrite=true', json=first)
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        self.assertEqual(replaced.json()['student_updated'], 1)
+        self.db.expire_all()
+        self.assertEqual(self.db.get(User, self.student.id).name, '新名字')
+        self.assertEqual(self.db.query(Question).one().content, '新题')
+        text = self.db.query(TypingText).filter_by(title='文章', teacher_id=self.teacher.id).one()
+        self.assertEqual(text.content, '新的正文内容')
+
+    def test_admin_pack_overwrites_teacher_account_and_bound_students(self):
+        admin = User(username='admin', name='管理员', password_hash='unused', role='admin')
+        self.db.add(admin)
+        self.student.managed_by_teacher_id = self.teacher.id
+        self.db.commit()
+        self.current = admin
+        payload = {
+            'format': 'xinxi_teacher_pack',
+            'version': 2,
+            'teachers': [{'username': 'teacher', 'name': '改名教师', 'assigned_classes': ['1班', '2班'], 'is_active': True}],
+            'students': [{'username': 'sync-student', 'name': '同步学生', 'class_name': '2班', 'teacher_username': 'teacher', 'is_active': True}],
+            'exams': [],
+            'typing_texts': [],
+        }
+        response = self.client.post('/api/import/teacher-pack?overwrite=true', json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['teacher_updated'], 1)
+        self.assertEqual(response.json()['student_removed'], 1)
+        self.db.expire_all()
+        teacher = self.db.query(User).filter_by(username='teacher').one()
+        self.assertEqual(teacher.name, '改名教师')
+        self.assertEqual(teacher.assigned_classes, ['1班', '2班'])
+        self.assertIsNone(self.db.query(User).filter_by(username='student').one_or_none())
+        created = self.db.query(User).filter_by(username='sync-student').one()
+        self.assertEqual(created.managed_by_teacher_id, teacher.id)
+        self.assertEqual(created.class_name, '2班')
 
     def test_pack_invalid_numbers_report_errors_without_partial_exam(self):
         payload = {"format": "xinxi_teacher_pack", "version": 1, "exams": [{"title": "无效考试", "duration_minutes": "非法数字"}], "typing_texts": [{"title": "无效文章", "content": "正文", "time_limit": "非法数字"}]}

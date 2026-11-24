@@ -44,6 +44,20 @@ PREFERRED_PORTS = [
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 _server_proc: subprocess.Popen | None = None
+_install_mutex = None
+
+
+def hold_install_mutex() -> None:
+    """让安装程序能发现正在运行的实例，卸载或覆盖安装前先关闭它。"""
+    global _install_mutex
+    if sys.platform != "win32" or _install_mutex:
+        return
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    _install_mutex = kernel32.CreateMutexW(None, False, "ExamSystemMutex")
 
 
 def get_install_dir() -> Path:
@@ -98,7 +112,7 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-APP_VERSION = "1.2.14"
+APP_VERSION = "1.2.15"
 
 _PROXY_ENV_KEYS = (
     "HTTP_PROXY",
@@ -423,6 +437,7 @@ class LauncherApp:
         self.lan_url = f"http://{self.local_ip}:{self.port}"
         self.root = tk.Tk()
         self.root.title("微机教室在线考试系统")
+        self._apply_window_icon()
         self.root.geometry("560x560")
         self.root.resizable(False, False)
         self.root.configure(bg=self.BG)
@@ -435,6 +450,22 @@ class LauncherApp:
         self._ui_running = True
         self._pump_after_id = None
         self._wait_after_id = None
+
+    def _apply_window_icon(self):
+        candidates = []
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys._MEIPASS) / "icon.ico")
+            candidates.append(Path(sys.executable).parent / "icon.ico")
+        else:
+            candidates.append(Path(__file__).resolve().parent / "icon.ico")
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                self.root.iconbitmap(default=str(path))
+                return
+            except Exception:
+                continue
 
     def _center_window(self):
         self.root.update_idletasks()
@@ -743,6 +774,7 @@ def serve_main(port: int) -> int:
 
 
 def main() -> int:
+    hold_install_mutex()
     # 子进程服务模式
     if len(sys.argv) >= 2 and sys.argv[1] in ("--serve", "serve"):
         port = int(sys.argv[2]) if len(sys.argv) >= 3 else PREFERRED_PORTS[0]

@@ -16,6 +16,7 @@ datas = [
     (str(FRONTEND_DIST), "frontend/dist"),
     (str(BACKEND / "app"), "backend/app"),
     (str(BACKEND / "seed.py"), "backend"),
+    (str(ROOT / "packaging" / "icon.ico"), "."),
 ]
 
 # 隐式导入
@@ -139,7 +140,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可放置 packaging/icon.ico
+    icon=str(ROOT / "packaging" / "icon.ico"),
 )
 
 coll = COLLECT(

@@ -396,15 +396,36 @@ async function handleExportPack() {
   ElMessage.success('已导出数据包，可在另一台机器导入')
 }
 
+async function confirmPackOverwrite() {
+  try {
+    await ElMessageBox.confirm(
+      '导入后，数据包中的教师账号、学生、班级、考试和打字文章会写入本机。如果本机已有相同账号，或这些教师以前的学生、考试和文章，确认后会用数据包覆盖。数据包里没有、但仍属于这些教师的旧学生、考试和文章也会被替换。',
+      '确认覆盖并导入',
+      { type: 'warning', confirmButtonText: '覆盖并导入', cancelButtonText: '取消' },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+function packSummary(result) {
+  return `教师新增 ${result?.teacher_created || 0}、更新 ${result?.teacher_updated || 0}，学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}、移除 ${result?.student_removed || 0}，考试 ${result?.exam_count || 0}，文章 ${result?.text_count || 0}`
+}
+
 async function handleImportPack(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
-  const result = await importApi.teacherPackFile(file)
+  if (!await confirmPackOverwrite()) return
+  const result = await importApi.teacherPackFile(file, true)
   await loadUsers()
-  ElMessage.success(
-    `导入完成：学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}，考试 ${result?.exam_count || 0}`
-  )
+  const summary = packSummary(result)
+  if (result?.errors?.length) {
+    await ElMessageBox.alert([summary, ...result.errors].join('\n'), '导入结果')
+  } else {
+    ElMessage.success(summary)
+  }
 }
 
 onMounted(async () => {

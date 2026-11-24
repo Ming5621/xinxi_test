@@ -107,10 +107,11 @@ export const importApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  teacherPackFile: (file) => {
+  teacherPackFile: (file, overwrite = false) => {
     const form = new FormData()
     form.append('file', file)
     return api.post('/import/teacher-pack/file', form, {
+      params: { overwrite },
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
