@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -315,6 +316,74 @@ class RegressionTests(unittest.TestCase):
         response = self.client.get(f"/api/stats/exam/{exam['id']}").json()
         self.assertEqual(response['question_stats'][0]['total_count'], 2)
         self.assertEqual(response['question_stats'][0]['correct_rate'], 50)
+
+    def test_submit_after_time_limit_still_saves_the_paper(self):
+        exam = self.exam()
+        self.client.post(f"/api/exams/{exam['id']}/publish")
+        self.current = self.student
+        started = self.client.post(f"/api/exams/{exam['id']}/start").json()
+        stored = self.db.get(ExamSession, started["id"])
+        stored.start_time = datetime.utcnow() - timedelta(hours=3)
+        self.db.commit()
+        response = self.client.post(
+            f"/api/exams/{exam['id']}/submit",
+            json={"answers": [{"question_id": exam["questions"][0]["id"], "student_answer": "正确"}]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "submitted")
+        self.assertEqual(response.json()["total_score"], 10)
+
+    def test_pack_exports_and_restores_student_activity(self):
+        exam = self.exam()
+        self.client.post(f"/api/exams/{exam['id']}/publish")
+        self.current = self.student
+        self.client.post(f"/api/exams/{exam['id']}/start")
+        submitted = self.client.post(
+            f"/api/exams/{exam['id']}/submit",
+            json={"answers": [{"question_id": exam["questions"][0]["id"], "student_answer": "正确"}]},
+        )
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.current = self.teacher
+        text = TypingText(teacher_id=self.teacher.id, title="日常短文", content="练习正文", char_count=4, is_active=True)
+        self.db.add(text)
+        self.db.flush()
+        self.db.add(TypingRecord(
+            student_id=self.student.id,
+            text_id=text.id,
+            source="practice",
+            reference_text="练习正文",
+            typed_text="练习正文",
+            duration_seconds=60,
+            wpm=20,
+            accuracy=100,
+            correct_chars=4,
+            level="良好",
+            score=80,
+        ))
+        self.student.password_hash = "$2b$12$roundsHashForMigrationTest"
+        self.db.commit()
+
+        exported = self.client.get("/api/export/teacher-pack")
+        self.assertEqual(exported.status_code, 200, exported.text)
+        payload = exported.json()
+        self.assertEqual(payload["version"], 3)
+        self.assertEqual(payload["students"][0]["password_hash"], self.student.password_hash)
+        self.assertEqual(payload["exam_results"][0]["total_score"], 10)
+        self.assertEqual(payload["typing_records"][0]["reference_text"], "练习正文")
+
+        self.db.query(Answer).delete()
+        self.db.query(ExamSession).delete()
+        self.db.query(TypingRecord).delete()
+        self.db.commit()
+        restored = self.client.post("/api/import/teacher-pack?overwrite=true", json=payload)
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["exam_result_count"], 1)
+        self.assertEqual(restored.json()["typing_record_count"], 1)
+        self.db.expire_all()
+        self.assertEqual(self.db.query(ExamSession).one().total_score, 10)
+        self.assertEqual(self.db.query(Answer).one().student_answer, "正确")
+        self.assertEqual(self.db.query(TypingRecord).one().typed_text, "练习正文")
+        self.assertEqual(self.db.get(User, self.student.id).password_hash, self.student.password_hash)
 
     def test_blank_submitted_questions_are_retained_at_zero_score(self):
         exam = self.exam()

@@ -84,6 +84,12 @@ async function handleLogout() {
   background: #0f172a;
   display: flex;
   flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -108,9 +114,12 @@ async function handleLogout() {
 .el-menu {
   border-right: none;
   flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .sidebar-footer {
+  flex-shrink: 0;
   padding: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }

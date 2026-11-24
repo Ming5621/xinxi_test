@@ -31,8 +31,6 @@ from ..schemas import (
     SessionOut,
 )
 
-SUBMIT_GRACE_SECONDS = 30
-
 router = APIRouter(prefix="/api/exams", tags=["考试管理"])
 
 
@@ -407,10 +405,9 @@ def submit_exam(
     if session.status == SessionStatus.submitted:
         raise HTTPException(status_code=400, detail="已提交，不能重复提交")
 
-    elapsed = (datetime.utcnow() - session.start_time).total_seconds()
-    max_seconds = exam.duration_minutes * 60 + SUBMIT_GRACE_SECONDS
-    if elapsed > max_seconds:
-        raise HTTPException(status_code=400, detail="考试时间已结束")
+    # 到点后仍接收这一次交卷。教室电脑时间可能偏慢，倒计时结束时如果直接拒绝，
+    # 学生会看到「考试时间已结束」并且答卷一直交不出去。
+    elapsed = max((datetime.utcnow() - session.start_time).total_seconds(), 0)
 
     db.query(Answer).filter(Answer.session_id == session.id).delete()
     question_map = {q.id: q for q in exam.questions}

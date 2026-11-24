@@ -445,7 +445,7 @@ async function handleExportPack() {
 async function confirmPackOverwrite() {
   try {
     await ElMessageBox.confirm(
-      '导入后，数据包中的教师账号、学生、班级、考试和打字文章会写入本机。如果本机已有相同账号，或这些教师以前的学生、考试和文章，确认后会用数据包覆盖。数据包里没有、但仍属于这些教师的旧学生、考试和文章也会被替换。',
+      '导入后，数据包中的教师和管理员账号（含登录密码）、学生、班级、考试、打字文章，以及全部考试答卷和打字记录会写入本机。如果本机已有相同账号，或这些教师以前的学生、考试、文章和成绩，确认后会用数据包覆盖。',
       '确认覆盖并导入',
       { type: 'warning', confirmButtonText: '覆盖并导入', cancelButtonText: '取消' },
     )
@@ -456,7 +456,7 @@ async function confirmPackOverwrite() {
 }
 
 function packSummary(result) {
-  return `教师新增 ${result?.teacher_created || 0}、更新 ${result?.teacher_updated || 0}，学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}、移除 ${result?.student_removed || 0}，考试 ${result?.exam_count || 0}，文章 ${result?.text_count || 0}`
+  return `教师新增 ${result?.teacher_created || 0}、更新 ${result?.teacher_updated || 0}，学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}、移除 ${result?.student_removed || 0}，考试 ${result?.exam_count || 0}，文章 ${result?.text_count || 0}，答卷 ${result?.exam_result_count || 0}，打字记录 ${result?.typing_record_count || 0}`
 }
 
 async function handleImportPack(event) {

@@ -9,7 +9,21 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 
 from .auth import DEFAULT_STUDENT_PASSWORD, get_password_hash
-from .models import Exam, Question, QuestionType, TypingDifficulty, TypingRecord, TypingText, User, UserRole
+from .models import (
+    Answer,
+    Exam,
+    ExamSession,
+    Question,
+    QuestionType,
+    SessionStatus,
+    TypingClassSession,
+    TypingClassSessionStatus,
+    TypingDifficulty,
+    TypingRecord,
+    TypingText,
+    User,
+    UserRole,
+)
 from .permissions import (
     active_student_name_taken,
     apply_student_scope,
@@ -24,8 +38,8 @@ from .timeutil import serialize_utc_datetime, utc_now
 from .schemas import ExamCreate, TypingTextCreate
 
 PACK_FORMAT = "xinxi_teacher_pack"
-PACK_VERSION = 2
-SUPPORTED_VERSIONS = {1, 2}
+PACK_VERSION = 3
+SUPPORTED_VERSIONS = {1, 2, 3}
 
 
 def build_teacher_pack(db: Session, current_user: User) -> dict:
@@ -54,9 +68,17 @@ def build_teacher_pack(db: Session, current_user: User) -> dict:
 
     teacher_names = {
         teacher.id: teacher.username
-        for teacher in db.query(User).filter(User.role == UserRole.teacher).all()
+        for teacher in db.query(User).filter(User.role.in_([UserRole.teacher, UserRole.admin])).all()
     }
     exported_teachers = teachers if current_user.role == UserRole.admin else [current_user]
+    admins = []
+    if current_user.role == UserRole.admin:
+        admins = db.query(User).filter(User.role == UserRole.admin).order_by(User.id).all()
+    student_ids = [student.id for student in students]
+    student_usernames = {student.id: student.username for student in students}
+    typing_sessions = _sessions_for_export(db, current_user)
+    typing_records = _records_for_export(db, student_ids)
+    exam_results = _exam_results_for_export(db, current_user, student_ids, {exam.id for exam in exams})
     return {
         "format": PACK_FORMAT,
         "version": PACK_VERSION,
@@ -93,6 +115,10 @@ def build_teacher_pack(db: Session, current_user: User) -> dict:
             for t in texts
         ],
         "exams": [_dump_exam(exam, teacher_names.get(exam.created_by, "")) for exam in exams],
+        "admins": [_dump_admin(admin) for admin in admins],
+        "typing_sessions": [_dump_typing_session(session, teacher_names) for session in typing_sessions],
+        "typing_records": [_dump_typing_record(record, student_usernames, teacher_names) for record in typing_records],
+        "exam_results": exam_results,
     }
 
 
@@ -105,7 +131,7 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict, overwrit
         version = 0
     if version not in SUPPORTED_VERSIONS:
         raise HTTPException(status_code=400, detail="数据包版本不受支持")
-    for key in ("teachers", "classes", "students", "typing_texts", "exams"):
+    for key in ("teachers", "classes", "students", "typing_texts", "exams", "admins", "typing_sessions", "typing_records", "exam_results"):
         if payload.get(key) is not None and not isinstance(payload[key], list):
             raise HTTPException(status_code=400, detail=f"数据包 {key} 必须是列表")
 
@@ -214,6 +240,9 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict, overwrit
 
     text_count = _import_texts(db, current_user, payload, overwrite, errors)
     exam_count = _import_exams(db, current_user, payload, overwrite, errors)
+    if is_admin:
+        _import_admins(db, payload.get("admins") or [], overwrite, errors)
+    activity = _import_activity(db, current_user, payload, overwrite, errors)
 
     db.commit()
     return {
@@ -225,8 +254,417 @@ def import_teacher_pack(db: Session, current_user: User, payload: dict, overwrit
         "student_removed": student_removed,
         "text_count": text_count,
         "exam_count": exam_count,
+        "typing_session_count": activity["typing_session_count"],
+        "typing_record_count": activity["typing_record_count"],
+        "exam_result_count": activity["exam_result_count"],
         "errors": errors,
     }
+
+
+def _sessions_for_export(db: Session, current_user: User) -> list[TypingClassSession]:
+    query = db.query(TypingClassSession).options(joinedload(TypingClassSession.text))
+    if current_user.role != UserRole.admin:
+        query = query.filter(TypingClassSession.teacher_id == current_user.id)
+    return query.order_by(TypingClassSession.id).all()
+
+
+def _records_for_export(db: Session, student_ids: list[int]) -> list[TypingRecord]:
+    if not student_ids:
+        return []
+    return (
+        db.query(TypingRecord)
+        .options(joinedload(TypingRecord.text), joinedload(TypingRecord.typing_session))
+        .filter(TypingRecord.student_id.in_(student_ids))
+        .order_by(TypingRecord.id)
+        .all()
+    )
+
+
+def _exam_results_for_export(db: Session, current_user: User, student_ids: list[int], exam_ids: set[int]) -> list[dict]:
+    if not student_ids:
+        return []
+    query = (
+        db.query(ExamSession)
+        .options(joinedload(ExamSession.answers), joinedload(ExamSession.exam).joinedload(Exam.questions), joinedload(ExamSession.student))
+        .filter(ExamSession.student_id.in_(student_ids))
+    )
+    if current_user.role != UserRole.admin:
+        query = query.filter(ExamSession.exam_id.in_(exam_ids or {-1}))
+    owners = {
+        user.id: user.username
+        for user in db.query(User).filter(User.role == UserRole.teacher).all()
+    }
+    results = []
+    seen_sessions: set[int] = set()
+    for session in query.order_by(ExamSession.id).all():
+        if session.id in seen_sessions:
+            continue
+        seen_sessions.add(session.id)
+        exam = session.exam
+        student = session.student
+        if not exam or not student:
+            continue
+        order_by_question = {question.id: question.order_num for question in exam.questions}
+        seen_answers: set[int] = set()
+        answers = []
+        for answer in session.answers:
+            if answer.id in seen_answers:
+                continue
+            seen_answers.add(answer.id)
+            answers.append({
+                "order_num": order_by_question.get(answer.question_id, 0),
+                "student_answer": answer.student_answer or "",
+                "is_correct": bool(answer.is_correct),
+                "score": answer.score,
+                "answer_meta": answer.answer_meta or {},
+            })
+        results.append({
+            "student_username": student.username,
+            "exam_title": exam.title,
+            "owner_username": current_user.username if current_user.role != UserRole.admin else owners.get(exam.created_by, ""),
+            "status": session.status.value if session.status else SessionStatus.submitted.value,
+            "start_time": serialize_utc_datetime(session.start_time) if session.start_time else "",
+            "submit_time": serialize_utc_datetime(session.submit_time) if session.submit_time else "",
+            "total_score": session.total_score,
+            "max_score": session.max_score,
+            "answers": answers,
+        })
+    return results
+
+
+def _dump_admin(admin: User) -> dict:
+    return {
+        "username": admin.username,
+        "name": admin.name,
+        "is_active": bool(admin.is_active),
+        "password_hash": admin.password_hash or "",
+        "must_change_password": bool(admin.must_change_password),
+    }
+
+
+def _dump_typing_session(session: TypingClassSession, teacher_names: dict[int, str]) -> dict:
+    return {
+        "owner_username": teacher_names.get(session.teacher_id, ""),
+        "class_name": session.class_name,
+        "title": session.title or "",
+        "text_title": session.text.title if session.text else "",
+        "status": session.status.value if session.status else TypingClassSessionStatus.ended.value,
+        "duration_seconds": session.duration_seconds,
+        "started_at": serialize_utc_datetime(session.started_at) if session.started_at else "",
+        "ended_at": serialize_utc_datetime(session.ended_at) if session.ended_at else "",
+        "created_at": serialize_utc_datetime(session.created_at) if session.created_at else "",
+    }
+
+
+def _dump_typing_record(record: TypingRecord, student_usernames: dict[int, str], teacher_names: dict[int, str]) -> dict:
+    session = record.typing_session
+    text = record.text
+    return {
+        "student_username": student_usernames.get(record.student_id, ""),
+        "text_title": text.title if text else "",
+        "text_owner_username": teacher_names.get(text.teacher_id, "") if text and text.teacher_id else "",
+        "session_owner_username": teacher_names.get(session.teacher_id, "") if session else "",
+        "session_class_name": session.class_name if session else "",
+        "session_title": (session.title or "") if session else "",
+        "session_created_at": serialize_utc_datetime(session.created_at) if session and session.created_at else "",
+        "source": record.source or "practice",
+        "reference_text": record.reference_text or "",
+        "typed_text": record.typed_text or "",
+        "duration_seconds": record.duration_seconds,
+        "wpm": record.wpm,
+        "accuracy": record.accuracy,
+        "correct_chars": record.correct_chars,
+        "level": record.level or "",
+        "score": record.score,
+        "created_at": serialize_utc_datetime(record.created_at) if record.created_at else "",
+    }
+
+
+def _import_admins(db: Session, items: list, overwrite: bool, errors: list[str]) -> None:
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        username = str(item.get("username") or "").strip()
+        name = str(item.get("name") or "").strip()
+        if not username or not name:
+            errors.append("跳过缺少用户名或姓名的管理员")
+            continue
+        existing = db.query(User).filter(User.username == username).first()
+        password_hash = _usable_password_hash(item.get("password_hash"))
+        if existing is None:
+            db.add(User(
+                username=username,
+                password_hash=password_hash or get_password_hash("admin123"),
+                must_change_password=bool(item.get("must_change_password", not password_hash)),
+                name=name,
+                role=UserRole.admin,
+                class_name="",
+                assigned_classes=[],
+                is_active=bool(item.get("is_active", True)),
+            ))
+            db.flush()
+            continue
+        if existing.role != UserRole.admin:
+            errors.append(f"用户名 {username} 已被其他角色占用，已跳过")
+            continue
+        if not overwrite:
+            errors.append(f"管理员账号 {username} 已存在，未覆盖")
+            continue
+        existing.name = name
+        existing.is_active = bool(item.get("is_active", existing.is_active))
+        if password_hash:
+            existing.password_hash = password_hash
+            existing.must_change_password = bool(item.get("must_change_password", False))
+        db.flush()
+
+
+def _parse_dt(value) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _import_activity(db: Session, current_user: User, payload: dict, overwrite: bool, errors: list[str]) -> dict:
+    counts = {"typing_session_count": 0, "typing_record_count": 0, "exam_result_count": 0}
+    if any(key in payload for key in ("typing_sessions", "typing_records", "exam_results")):
+        counts["typing_session_count"] = _import_typing_sessions(db, current_user, payload, overwrite, errors)
+        counts["exam_result_count"] = _import_exam_results(db, current_user, payload, overwrite, errors)
+        counts["typing_record_count"] = _import_typing_records(db, current_user, payload, overwrite, errors)
+    return counts
+
+
+def _owner_user(db: Session, current_user: User, username: str) -> User | None:
+    if current_user.role == UserRole.teacher:
+        return current_user
+    name = str(username or "").strip()
+    if not name:
+        return None
+    return db.query(User).filter(User.username == name, User.role == UserRole.teacher).first()
+
+
+def _import_typing_sessions(db: Session, current_user: User, payload: dict, overwrite: bool, errors: list[str]) -> int:
+    items = payload.get("typing_sessions") or []
+    if overwrite and "typing_sessions" in payload:
+        owner_ids = {current_user.id} if current_user.role == UserRole.teacher else set()
+        if current_user.role == UserRole.admin:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                owner = _owner_user(db, current_user, item.get("owner_username"))
+                if owner:
+                    owner_ids.add(owner.id)
+        if owner_ids:
+            session_ids = [
+                row.id for row in db.query(TypingClassSession.id).filter(TypingClassSession.teacher_id.in_(owner_ids))
+            ]
+            if session_ids:
+                db.query(TypingRecord).filter(TypingRecord.typing_session_id.in_(session_ids)).delete(synchronize_session=False)
+            db.query(TypingClassSession).filter(TypingClassSession.teacher_id.in_(owner_ids)).delete(synchronize_session=False)
+            db.flush()
+    written = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        owner = _owner_user(db, current_user, item.get("owner_username"))
+        class_name = str(item.get("class_name") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if owner is None or not class_name:
+            errors.append(f"课堂测试「{title or '未命名'}」找不到教师或班级，已跳过")
+            continue
+        text = None
+        text_title = str(item.get("text_title") or "").strip()
+        if text_title:
+            text = db.query(TypingText).filter(TypingText.teacher_id == owner.id, TypingText.title == text_title).first()
+        if text is None:
+            errors.append(f"课堂测试「{title or text_title}」找不到对应文章，已跳过")
+            continue
+        created_at = _parse_dt(item.get("created_at")) or utc_now()
+        if not overwrite:
+            exists = db.query(TypingClassSession).filter(
+                TypingClassSession.teacher_id == owner.id,
+                TypingClassSession.class_name == class_name,
+                TypingClassSession.title == title,
+                TypingClassSession.created_at == created_at,
+            ).first()
+            if exists:
+                continue
+        status = item.get("status")
+        try:
+            status = TypingClassSessionStatus(status)
+        except ValueError:
+            status = TypingClassSessionStatus.ended
+        db.add(TypingClassSession(
+            teacher_id=owner.id,
+            text_id=text.id,
+            class_name=class_name,
+            title=title,
+            status=status,
+            duration_seconds=int(item.get("duration_seconds") or 300),
+            started_at=_parse_dt(item.get("started_at")),
+            ended_at=_parse_dt(item.get("ended_at")),
+            created_at=created_at,
+        ))
+        written += 1
+    db.flush()
+    return written
+
+
+def _import_exam_results(db: Session, current_user: User, payload: dict, overwrite: bool, errors: list[str]) -> int:
+    items = payload.get("exam_results") or []
+    written = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        username = str(item.get("student_username") or "").strip()
+        title = str(item.get("exam_title") or "").strip()
+        student = db.query(User).filter(User.username == username, User.role == UserRole.student).first()
+        owner = _owner_user(db, current_user, item.get("owner_username"))
+        if student is None or owner is None or not title:
+            errors.append(f"考试成绩「{title or username}」找不到学生或教师，已跳过")
+            continue
+        if current_user.role == UserRole.teacher and not student_in_scope(current_user, student):
+            errors.append(f"无权导入学生 {username} 的考试成绩，已跳过")
+            continue
+        exam = (
+            db.query(Exam)
+            .options(joinedload(Exam.questions))
+            .filter(Exam.created_by == owner.id, Exam.title == title)
+            .first()
+        )
+        if exam is None:
+            errors.append(f"考试成绩「{title}」找不到对应考试，已跳过")
+            continue
+        start_time = _parse_dt(item.get("start_time")) or utc_now()
+        existing = db.query(ExamSession).filter(
+            ExamSession.exam_id == exam.id,
+            ExamSession.student_id == student.id,
+            ExamSession.start_time == start_time,
+        ).first()
+        if existing and not overwrite:
+            continue
+        if existing and overwrite:
+            db.delete(existing)
+            db.flush()
+        try:
+            status = SessionStatus(item.get("status"))
+        except ValueError:
+            status = SessionStatus.submitted
+        session = ExamSession(
+            exam_id=exam.id,
+            student_id=student.id,
+            status=status,
+            start_time=start_time,
+            submit_time=_parse_dt(item.get("submit_time")),
+            total_score=float(item.get("total_score") or 0),
+            max_score=float(item.get("max_score") or 0),
+        )
+        db.add(session)
+        db.flush()
+        questions = {question.order_num: question for question in exam.questions}
+        for answer in item.get("answers") or []:
+            if not isinstance(answer, dict):
+                continue
+            question = questions.get(answer.get("order_num"))
+            if question is None:
+                continue
+            db.add(Answer(
+                session_id=session.id,
+                question_id=question.id,
+                student_answer=str(answer.get("student_answer") or ""),
+                is_correct=bool(answer.get("is_correct")),
+                score=float(answer.get("score") or 0),
+                answer_meta=answer.get("answer_meta") if isinstance(answer.get("answer_meta"), dict) else {},
+            ))
+        written += 1
+    db.flush()
+    return written
+
+
+def _find_typing_session(db: Session, owner: User | None, item: dict) -> TypingClassSession | None:
+    if owner is None:
+        return None
+    created_at = _parse_dt(item.get("session_created_at"))
+    query = db.query(TypingClassSession).filter(
+        TypingClassSession.teacher_id == owner.id,
+        TypingClassSession.class_name == str(item.get("session_class_name") or ""),
+        TypingClassSession.title == str(item.get("session_title") or ""),
+    )
+    if created_at is not None:
+        query = query.filter(TypingClassSession.created_at == created_at)
+    return query.order_by(TypingClassSession.id.desc()).first()
+
+
+def _import_typing_records(db: Session, current_user: User, payload: dict, overwrite: bool, errors: list[str]) -> int:
+    items = payload.get("typing_records") or []
+    if overwrite and "typing_records" in payload:
+        usernames = {
+            str(item.get("student_username") or "").strip()
+            for item in items if isinstance(item, dict)
+        }
+        usernames.discard("")
+        if usernames:
+            student_ids = [
+                row.id for row in db.query(User.id).filter(User.role == UserRole.student, User.username.in_(usernames))
+            ]
+            if student_ids:
+                db.query(TypingRecord).filter(TypingRecord.student_id.in_(student_ids)).delete(synchronize_session=False)
+                db.flush()
+    written = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        username = str(item.get("student_username") or "").strip()
+        student = db.query(User).filter(User.username == username, User.role == UserRole.student).first()
+        if student is None:
+            errors.append(f"打字记录找不到学生 {username or '未命名'}，已跳过")
+            continue
+        if current_user.role == UserRole.teacher and not student_in_scope(current_user, student):
+            errors.append(f"无权导入学生 {username} 的打字记录，已跳过")
+            continue
+        created_at = _parse_dt(item.get("created_at")) or utc_now()
+        if not overwrite:
+            exists = db.query(TypingRecord).filter(
+                TypingRecord.student_id == student.id,
+                TypingRecord.source == str(item.get("source") or "practice"),
+                TypingRecord.created_at == created_at,
+            ).first()
+            if exists:
+                continue
+        text = None
+        text_title = str(item.get("text_title") or "").strip()
+        if text_title:
+            owner = _owner_user(db, current_user, item.get("text_owner_username"))
+            if owner:
+                text = db.query(TypingText).filter(TypingText.teacher_id == owner.id, TypingText.title == text_title).first()
+        session_owner = _owner_user(db, current_user, item.get("session_owner_username"))
+        typing_session = _find_typing_session(db, session_owner, item)
+        db.add(TypingRecord(
+            student_id=student.id,
+            text_id=text.id if text else None,
+            typing_session_id=typing_session.id if typing_session else None,
+            source=str(item.get("source") or "practice")[:20],
+            reference_text=str(item.get("reference_text") or ""),
+            typed_text=str(item.get("typed_text") or ""),
+            duration_seconds=float(item.get("duration_seconds") or 0),
+            wpm=float(item.get("wpm") or 0),
+            accuracy=float(item.get("accuracy") or 0),
+            correct_chars=int(item.get("correct_chars") or 0),
+            level=str(item.get("level") or ""),
+            score=float(item.get("score") or 0),
+            created_at=created_at,
+        ))
+        written += 1
+    db.flush()
+    return written
 
 
 def pack_filename(user: User) -> str:

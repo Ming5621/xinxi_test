@@ -333,13 +333,14 @@ onMounted(async () => {
     }
     loadDraft()
     timeLeft.value = getRemainingSeconds(examData.duration_minutes, session.start_time)
-    timer = setInterval(() => {
-      timeLeft.value = getRemainingSeconds(examData.duration_minutes, sessionStartTime.value)
-      if (timeLeft.value <= 0) {
-        clearInterval(timer)
-        autoSubmit()
-      }
-    }, 1000)
+    if (timeLeft.value <= 0) {
+      autoSubmit()
+    } else {
+      timer = setInterval(() => {
+        timeLeft.value = getRemainingSeconds(examData.duration_minutes, sessionStartTime.value)
+        if (timeLeft.value <= 0) autoSubmit()
+      }, 1000)
+    }
   } catch (e) {
     const msg = e?.response?.data?.detail || e?.message || '加载考试失败'
     ElMessage.error(typeof msg === 'string' ? msg : '加载考试失败')
@@ -378,9 +379,15 @@ function goToQuestion(i) {
   currentIndex.value = i
 }
 
+let autoSubmitted = false
+
 async function autoSubmit() {
+  if (autoSubmitted) return
+  autoSubmitted = true
+  clearInterval(timer)
   ElMessage.warning('考试时间到，系统自动提交！')
-  await doSubmit()
+  const ok = await doSubmit()
+  if (!ok) autoSubmitted = false
 }
 
 async function handleSubmit(evt) {
@@ -433,8 +440,10 @@ async function doSubmit() {
     sessionStorage.removeItem(draftKey)
     ElMessage.success(`提交成功！得分: ${result.total_score}/${result.max_score}`)
     router.push('/student/results')
+    return true
   } catch {
     // 错误由拦截器提示
+    return false
   } finally {
     submitting.value = false
   }

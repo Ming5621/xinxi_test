@@ -309,7 +309,7 @@ async function handleExportPack() {
 async function confirmPackOverwrite() {
   try {
     await ElMessageBox.confirm(
-      '导入后，数据包中的学生、班级、考试和打字文章会写入当前教师账号。如果本机已有相同学生账号，或该教师以前的考试和文章，确认后会用数据包覆盖。数据包里没有、但仍属于该教师的旧学生、考试和文章也会被替换。',
+      '导入后，数据包中的学生账号（含登录密码）、班级、考试、打字文章，以及这些学生的考试答卷和打字记录会写入当前教师账号。如果本机已有相同学生账号，或该教师以前的考试、文章和成绩，确认后会用数据包覆盖。',
       '确认覆盖并导入',
       { type: 'warning', confirmButtonText: '覆盖并导入', cancelButtonText: '取消' },
     )
@@ -327,7 +327,7 @@ async function handleImportPack(event) {
   const result = await importApi.teacherPackFile(file, true)
   await loadClasses()
   await loadStudents()
-  const summary = `学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}、移除 ${result?.student_removed || 0}，考试 ${result?.exam_count || 0}，文章 ${result?.text_count || 0}`
+  const summary = `学生新增 ${result?.student_created || 0}、更新 ${result?.student_updated || 0}、移除 ${result?.student_removed || 0}，考试 ${result?.exam_count || 0}，文章 ${result?.text_count || 0}，答卷 ${result?.exam_result_count || 0}，打字记录 ${result?.typing_record_count || 0}`
   if (result?.errors?.length) {
     await ElMessageBox.alert([summary, ...result.errors].join('\n'), '导入结果', {
       customClass: 'pack-import-result',
