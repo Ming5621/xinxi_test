@@ -53,7 +53,17 @@ async function downloadExport(path, params = {}, filename = 'export.xlsx') {
     ElMessage.error('登录已过期，请重新登录')
     throw new Error('未授权')
   }
-  if (!res.ok) throw new Error('导出失败')
+  if (!res.ok) {
+    let detail = '导出失败'
+    try {
+      const data = await res.json()
+      if (typeof data?.detail === 'string' && data.detail) detail = data.detail
+    } catch {
+      // 响应不是 JSON 时沿用统一提示
+    }
+    ElMessage.error(detail)
+    throw new Error(detail)
+  }
   const blob = await res.blob()
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)

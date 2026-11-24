@@ -292,7 +292,7 @@ def _exam_results_for_export(db: Session, current_user: User, student_ids: list[
         query = query.filter(ExamSession.exam_id.in_(exam_ids or {-1}))
     owners = {
         user.id: user.username
-        for user in db.query(User).filter(User.role == UserRole.teacher).all()
+        for user in db.query(User).filter(User.role.in_([UserRole.teacher, UserRole.admin])).all()
     }
     results = []
     seen_sessions: set[int] = set()
@@ -433,6 +433,13 @@ def _parse_dt(value) -> datetime | None:
     return parsed
 
 
+def _safe_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _import_activity(db: Session, current_user: User, payload: dict, overwrite: bool, errors: list[str]) -> dict:
     counts = {"typing_session_count": 0, "typing_record_count": 0, "exam_result_count": 0}
     if any(key in payload for key in ("typing_sessions", "typing_records", "exam_results")):
@@ -442,13 +449,20 @@ def _import_activity(db: Session, current_user: User, payload: dict, overwrite: 
     return counts
 
 
-def _owner_user(db: Session, current_user: User, username: str) -> User | None:
-    if current_user.role == UserRole.teacher:
-        return current_user
+def _staff_owner(db: Session, username: str) -> User | None:
     name = str(username or "").strip()
     if not name:
         return None
-    return db.query(User).filter(User.username == name, User.role == UserRole.teacher).first()
+    return db.query(User).filter(
+        User.username == name,
+        User.role.in_([UserRole.teacher, UserRole.admin]),
+    ).first()
+
+
+def _owner_user(db: Session, current_user: User, username: str) -> User | None:
+    if current_user.role == UserRole.teacher:
+        return current_user
+    return _staff_owner(db, username)
 
 
 def _import_typing_sessions(db: Session, current_user: User, payload: dict, overwrite: bool, errors: list[str]) -> int:
@@ -508,7 +522,7 @@ def _import_typing_sessions(db: Session, current_user: User, payload: dict, over
             class_name=class_name,
             title=title,
             status=status,
-            duration_seconds=int(item.get("duration_seconds") or 300),
+            duration_seconds=_safe_int(item.get("duration_seconds"), 300),
             started_at=_parse_dt(item.get("started_at")),
             ended_at=_parse_dt(item.get("ended_at")),
             created_at=created_at,
@@ -558,30 +572,49 @@ def _import_exam_results(db: Session, current_user: User, payload: dict, overwri
             status = SessionStatus(item.get("status"))
         except ValueError:
             status = SessionStatus.submitted
+        try:
+            total_score = float(item.get("total_score") or 0)
+            max_score = float(item.get("max_score") or 0)
+        except (TypeError, ValueError):
+            errors.append(f"考试成绩「{title}」分数无效，已跳过")
+            continue
         session = ExamSession(
             exam_id=exam.id,
             student_id=student.id,
             status=status,
             start_time=start_time,
             submit_time=_parse_dt(item.get("submit_time")),
-            total_score=float(item.get("total_score") or 0),
-            max_score=float(item.get("max_score") or 0),
+            total_score=total_score,
+            max_score=max_score,
         )
         db.add(session)
         db.flush()
-        questions = {question.order_num: question for question in exam.questions}
+        questions_by_order: dict[int, list[Question]] = {}
+        for question in sorted(exam.questions, key=lambda item: (item.order_num or 0, item.id or 0)):
+            questions_by_order.setdefault(question.order_num, []).append(question)
         for answer in item.get("answers") or []:
             if not isinstance(answer, dict):
                 continue
-            question = questions.get(answer.get("order_num"))
-            if question is None:
+            order_num = answer.get("order_num")
+            try:
+                order_num = int(order_num)
+            except (TypeError, ValueError):
+                continue
+            pool = questions_by_order.get(order_num) or []
+            if not pool:
+                continue
+            question = pool.pop(0)
+            try:
+                score = float(answer.get("score") or 0)
+            except (TypeError, ValueError):
+                errors.append(f"考试成绩「{title}」有一道题的分数无效，已跳过该题")
                 continue
             db.add(Answer(
                 session_id=session.id,
                 question_id=question.id,
                 student_answer=str(answer.get("student_answer") or ""),
                 is_correct=bool(answer.get("is_correct")),
-                score=float(answer.get("score") or 0),
+                score=score,
                 answer_meta=answer.get("answer_meta") if isinstance(answer.get("answer_meta"), dict) else {},
             ))
         written += 1
@@ -647,6 +680,15 @@ def _import_typing_records(db: Session, current_user: User, payload: dict, overw
                 text = db.query(TypingText).filter(TypingText.teacher_id == owner.id, TypingText.title == text_title).first()
         session_owner = _owner_user(db, current_user, item.get("session_owner_username"))
         typing_session = _find_typing_session(db, session_owner, item)
+        try:
+            duration_seconds = float(item.get("duration_seconds") or 0)
+            wpm = float(item.get("wpm") or 0)
+            accuracy = float(item.get("accuracy") or 0)
+            correct_chars = int(item.get("correct_chars") or 0)
+            score = float(item.get("score") or 0)
+        except (TypeError, ValueError):
+            errors.append(f"学生 {username} 有一条打字记录数字无效，已跳过")
+            continue
         db.add(TypingRecord(
             student_id=student.id,
             text_id=text.id if text else None,
@@ -654,12 +696,12 @@ def _import_typing_records(db: Session, current_user: User, payload: dict, overw
             source=str(item.get("source") or "practice")[:20],
             reference_text=str(item.get("reference_text") or ""),
             typed_text=str(item.get("typed_text") or ""),
-            duration_seconds=float(item.get("duration_seconds") or 0),
-            wpm=float(item.get("wpm") or 0),
-            accuracy=float(item.get("accuracy") or 0),
-            correct_chars=int(item.get("correct_chars") or 0),
+            duration_seconds=duration_seconds,
+            wpm=wpm,
+            accuracy=accuracy,
+            correct_chars=correct_chars,
             level=str(item.get("level") or ""),
-            score=float(item.get("score") or 0),
+            score=score,
             created_at=created_at,
         ))
         written += 1
@@ -839,7 +881,7 @@ def _content_owner_id(db: Session, current_user: User, item: dict) -> int | None
     owner_name = str(item.get("owner_username") or "").strip()
     if not owner_name:
         return current_user.id
-    owner = db.query(User).filter(User.username == owner_name, User.role == UserRole.teacher).first()
+    owner = _staff_owner(db, owner_name)
     return owner.id if owner else None
 
 

@@ -102,7 +102,8 @@ def compare_text(reference: str, typed: str) -> dict:
 
 
 def calculate_wpm(correct_chars: int, duration_seconds: float) -> float:
-    if duration_seconds <= 0:
+    # 不到 1 秒就交卷时，按真实用时会算出每分钟成千上万字。练习页同样把这段记为 0。
+    if duration_seconds <= 1:
         return 0.0
     minutes = duration_seconds / 60
     return round(correct_chars / minutes, 1)

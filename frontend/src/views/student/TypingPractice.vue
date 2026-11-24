@@ -44,7 +44,7 @@
       <div class="bar-field class-field" v-else>
         <span class="bar-label">课堂测试</span>
         <span class="class-test-title">{{ classSession?.text_title }}</span>
-        <el-tag type="warning" size="small">5 分钟 · 不可停止</el-tag>
+        <el-tag type="warning" size="small">{{ classLimitLabel }}</el-tag>
       </div>
 
       <div class="bar-field" v-if="!inClassTest">
@@ -168,6 +168,11 @@ const lastFinished = ref(false)
 const historyVisible = ref(false)
 
 const selected = computed(() => texts.value.find((t) => t.id === selectedId.value))
+const classLimitLabel = computed(() => {
+  const seconds = Number(joinedSession.value?.duration_seconds) || 300
+  const length = seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`
+  return `${length} · 不可停止`
+})
 const typingActive = ref(false)
 const lastResult = ref(null)
 const history = ref([])
@@ -280,9 +285,15 @@ let sessionPollTimer = null
 async function handleComplete(data) {
   typingActive.value = false
   lastFinished.value = true
+  const article = selected.value
+  const textId = article?.id || (inClassTest.value ? joinedSession.value?.text_id : null)
+  if (!textId) {
+    ElMessage.error('练习文章已不可用，这次成绩没有保存')
+    return
+  }
   const payload = {
-    text_id: selected.value.id,
-    reference_text: selected.value.content,
+    text_id: textId,
+    reference_text: article?.content || '',
     typed_text: data.typed_text,
     duration_seconds: data.duration_seconds,
     source: data.mode === 'test' ? 'test' : 'practice',

@@ -3,7 +3,7 @@
 ; 本文件必须保存为带 BOM 的 UTF-8，否则在中文 Windows 上目录名会乱码，卸载会删错位置。
 
 #define MyAppName "微机教室考试系统"
-#define MyAppVersion "1.2.16"
+#define MyAppVersion "1.2.17"
 #define MyAppPublisher "柴延明"
 #define MyAppExeName "ExamSystem.exe"
 #define MyDataDir "微机教室考试系统"

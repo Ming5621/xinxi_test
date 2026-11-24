@@ -49,6 +49,9 @@ from ..typing_utils import (
 
 router = APIRouter(prefix="/api/typing", tags=["打字练习"])
 
+# 教师点击结束和学生对时结束可能相差一两分钟，这段时间内仍收下这一次答卷。
+CLASS_SUBMIT_GRACE_SECONDS = 180
+
 
 @router.get("/standards", response_model=TypingStandardsOut)
 def get_standards():
@@ -536,7 +539,11 @@ def submit_typing(
             or current_user.managed_by_teacher_id != typing_session.teacher_id
         ):
             raise HTTPException(status_code=403, detail="无权参加该测试")
-        if typing_session.status != TypingClassSessionStatus.active:
+        if typing_session.status == TypingClassSessionStatus.ended:
+            ended_at = typing_session.ended_at or datetime.utcnow()
+            if (datetime.utcnow() - ended_at).total_seconds() > CLASS_SUBMIT_GRACE_SECONDS:
+                raise HTTPException(status_code=400, detail="课堂测试已结束")
+        elif typing_session.status != TypingClassSessionStatus.active:
             raise HTTPException(status_code=400, detail="课堂测试未在进行中")
         existing = (
             db.query(TypingRecord)
@@ -555,7 +562,10 @@ def submit_typing(
     if typing_session and data.text_id is not None and data.text_id != text_id:
         raise HTTPException(status_code=403, detail="课堂测试文章不匹配")
     if text_id:
-        text = db.query(TypingText).filter(TypingText.id == text_id, TypingText.is_active == True).first()
+        text_query = db.query(TypingText).filter(TypingText.id == text_id)
+        if not typing_session:
+            text_query = text_query.filter(TypingText.is_active == True)
+        text = text_query.first()
         if not text:
             raise HTTPException(status_code=404, detail="练习文章不存在")
         visible_teachers = _student_visible_teacher_ids(db, current_user)
@@ -564,7 +574,10 @@ def submit_typing(
         reference_text = text.content
 
     comparison = compare_text(reference_text, data.typed_text)
-    wpm = calculate_wpm(comparison["correct_chars"], data.duration_seconds)
+    duration = data.duration_seconds
+    if typing_session and typing_session.duration_seconds:
+        duration = min(duration, float(typing_session.duration_seconds))
+    wpm = calculate_wpm(comparison["correct_chars"], duration)
     min_accuracy = DEFAULT_TYPING_CONFIG["min_accuracy"]
     level_info = get_typing_level(wpm, comparison["accuracy"], min_accuracy)
     score, passed, remark = score_typing_question(
@@ -578,7 +591,7 @@ def submit_typing(
         source=source,
         reference_text=reference_text,
         typed_text=data.typed_text,
-        duration_seconds=data.duration_seconds,
+        duration_seconds=duration,
         wpm=wpm,
         accuracy=comparison["accuracy"],
         correct_chars=comparison["correct_chars"],

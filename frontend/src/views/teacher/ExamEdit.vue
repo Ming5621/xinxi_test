@@ -200,7 +200,7 @@ function handleQuestionsImported(questions) {
     form.value.questions.push({
       type: q.type,
       content: q.content,
-      options: [...q.options],
+      options: Array.isArray(q.options) ? [...q.options] : (q.options || []),
       correct_answer: q.correct_answer,
       score: q.score,
       order_num: startOrder + i,

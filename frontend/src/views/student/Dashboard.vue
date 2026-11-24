@@ -26,7 +26,7 @@
               type="primary"
               @click="startExam(exam)"
             >
-              开始考试
+              {{ inProgressExams.has(exam.id) ? '继续答题' : '开始考试' }}
             </el-button>
             <el-button
               v-else-if="submittedExams.has(exam.id)"
@@ -58,6 +58,7 @@ const router = useRouter()
 const loading = ref(true)
 const exams = ref([])
 const submittedExams = ref(new Set())
+const inProgressExams = ref(new Set())
 
 const statusText = { draft: '草稿', published: '进行中', ended: '已结束' }
 const statusTag = { draft: 'info', published: 'success', ended: 'warning' }
@@ -68,15 +69,19 @@ onMounted(async () => {
   exams.value = examList
   sessions.forEach((s) => {
     if (s.status === 'submitted') submittedExams.value.add(s.exam_id)
+    else if (s.status === 'in_progress') inProgressExams.value.add(s.exam_id)
   })
   loading.value = false
 })
 
 async function startExam(exam) {
+  const continuing = inProgressExams.value.has(exam.id)
   await ElMessageBox.confirm(
-    `即将开始「${exam.title}」，考试时长 ${exam.duration_minutes} 分钟，确定开始吗？`,
-    '开始考试',
-    { type: 'info', confirmButtonText: '开始答题', cancelButtonText: '再想想' }
+    continuing
+      ? `「${exam.title}」还在答题中，倒计时从上次进入时继续计算。`
+      : `即将开始「${exam.title}」，考试时长 ${exam.duration_minutes} 分钟，确定开始吗？`,
+    continuing ? '继续答题' : '开始考试',
+    { type: 'info', confirmButtonText: continuing ? '继续答题' : '开始答题', cancelButtonText: '再想想' }
   )
   await examApi.start(exam.id)
   router.push(`/student/exam/${exam.id}`)

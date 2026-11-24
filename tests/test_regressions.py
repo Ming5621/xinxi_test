@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from app.auth import get_current_user, require_student, require_teacher
 from app.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import Answer, ExamSession, Question, TypingClassSession, TypingRecord, TypingText, User
+from app.models import Answer, Exam, ExamSession, Question, TypingClassSession, TypingRecord, TypingText, User
 
 
 class RegressionTests(unittest.TestCase):
@@ -513,6 +513,187 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()[0]['id'], session.id)
         self.assertEqual(response.json()[0]['participant_count'], 1)
+
+    def test_fast_typing_submit_keeps_duration_floor(self):
+        response = self.client.post("/api/exams", json={
+            "title": "打字",
+            "questions": [{
+                "type": "typing",
+                "content": "测试文本",
+                "options": {"time_limit": 120, "min_wpm": 10, "min_accuracy": 95},
+                "correct_answer": "测试文本",
+                "score": 18,
+            }],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        exam = response.json()
+        self.client.post(f"/api/exams/{exam['id']}/publish")
+        self.current = self.student
+        self.client.post(f"/api/exams/{exam['id']}/start")
+        session = self.db.query(ExamSession).filter_by(exam_id=exam["id"]).one()
+        session.start_time = datetime.utcnow() - timedelta(seconds=1)
+        self.db.commit()
+        submitted = self.client.post(f"/api/exams/{exam['id']}/submit", json={
+            "answers": [{
+                "question_id": exam["questions"][0]["id"],
+                "student_answer": "测试文本",
+                "answer_meta": {"duration_seconds": 60},
+            }],
+        })
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.db.expire_all()
+        answer = self.db.query(Answer).filter_by(session_id=session.id).one()
+        self.assertGreaterEqual(answer.answer_meta["duration_seconds"], 5)
+        self.assertLess(answer.answer_meta["wpm"], 100)
+
+    def test_choice_letter_with_option_text_is_correct(self):
+        from app.import_utils import normalize_answer
+        self.assertEqual(normalize_answer("B. CPU", "choice"), "B")
+        response = self.client.post("/api/exams", json={
+            "title": "选择",
+            "questions": [{
+                "type": "choice",
+                "content": "处理器",
+                "options": ["A. 内存", "B. CPU"],
+                "correct_answer": "B. CPU",
+                "score": 10,
+            }],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        exam = response.json()
+        self.client.post(f"/api/exams/{exam['id']}/publish")
+        self.current = self.student
+        self.client.post(f"/api/exams/{exam['id']}/start")
+        submitted = self.client.post(f"/api/exams/{exam['id']}/submit", json={
+            "answers": [{"question_id": exam["questions"][0]["id"], "student_answer": "B"}],
+        })
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.assertEqual(submitted.json()["total_score"], 10)
+
+    def test_my_sessions_skips_orphaned_exam(self):
+        exam = self.exam()
+        self.db.add(ExamSession(exam_id=exam["id"], student_id=self.student.id))
+        self.db.commit()
+        session_id = self.db.query(ExamSession).one().id
+        self.db.query(Exam).filter_by(id=exam["id"]).delete(synchronize_session=False)
+        self.db.commit()
+        self.current = self.student
+        response = self.client.get("/api/exams/sessions/my")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), [])
+        detail = self.client.get(f"/api/exams/sessions/{session_id}")
+        self.assertEqual(detail.status_code, 404, detail.text)
+
+    def test_admin_pack_roundtrip_keeps_admin_exam_results(self):
+        admin = User(username="admin", name="管理员", password_hash="unused", role="admin")
+        self.db.add(admin)
+        self.db.commit()
+        self.current = admin
+        exam = self.exam()
+        self.client.post(f"/api/exams/{exam['id']}/publish")
+        self.student.managed_by_teacher_id = admin.id
+        self.db.commit()
+        self.current = self.student
+        self.client.post(f"/api/exams/{exam['id']}/start")
+        submitted = self.client.post(f"/api/exams/{exam['id']}/submit", json={
+            "answers": [{"question_id": exam["questions"][0]["id"], "student_answer": "正确"}],
+        })
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.current = admin
+        pack = self.client.get("/api/export/teacher-pack").json()
+        self.assertEqual(pack["exams"][0]["owner_username"], "admin")
+        self.assertEqual(pack["exam_results"][0]["owner_username"], "admin")
+        self.db.query(Answer).delete()
+        self.db.query(ExamSession).delete()
+        self.db.query(Question).delete()
+        self.db.query(Exam).delete()
+        self.db.commit()
+        imported = self.client.post("/api/import/teacher-pack?overwrite=true", json=pack)
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertFalse([err for err in imported.json()["errors"] if "找不到" in err], imported.text)
+        self.db.expire_all()
+        restored = self.db.query(Exam).filter_by(title="测试").one()
+        self.assertEqual(restored.created_by, admin.id)
+        session = self.db.query(ExamSession).one()
+        self.assertEqual(session.total_score, 10)
+        self.assertEqual(self.db.query(Answer).count(), 1)
+
+    def test_invalid_typing_record_number_does_not_abort_import(self):
+        payload = {
+            "format": "xinxi_teacher_pack",
+            "version": 3,
+            "typing_records": [{
+                "student_username": "student",
+                "source": "practice",
+                "reference_text": "正文",
+                "typed_text": "正",
+                "duration_seconds": "不是数字",
+                "created_at": "2026-11-24T00:00:00Z",
+            }],
+        }
+        response = self.client.post("/api/import/teacher-pack", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["errors"])
+        self.assertEqual(self.db.query(TypingRecord).count(), 0)
+
+    def test_instant_typing_submit_does_not_get_full_marks(self):
+        self.current = self.student
+        response = self.client.post("/api/typing/submit", json={
+            "reference_text": "测试文本",
+            "typed_text": "测试文本",
+            "duration_seconds": 0.2,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["wpm"], 0)
+        self.assertLess(response.json()["score"], 50)
+
+    def test_class_test_accepts_submit_just_after_teacher_ends(self):
+        session = self.typing_session("ended")
+        session.started_at = datetime.utcnow() - timedelta(seconds=300)
+        session.ended_at = datetime.utcnow()
+        self.db.commit()
+        self.current = self.student
+        response = self.client.post("/api/typing/submit", json={
+            "typing_session_id": session.id,
+            "text_id": session.text_id,
+            "reference_text": "指定的文章",
+            "typed_text": "指定的文章",
+            "duration_seconds": 9999,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.expire_all()
+        record = self.db.query(TypingRecord).one()
+        self.assertEqual(record.duration_seconds, session.duration_seconds)
+        self.assertEqual(record.source, "class_test")
+
+    def test_class_test_rejects_submit_long_after_it_ended(self):
+        session = self.typing_session("ended")
+        session.ended_at = datetime.utcnow() - timedelta(minutes=10)
+        self.db.commit()
+        self.current = self.student
+        response = self.client.post("/api/typing/submit", json={
+            "typing_session_id": session.id,
+            "reference_text": "指定的文章",
+            "typed_text": "指定的文章",
+            "duration_seconds": 60,
+        })
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_class_test_can_submit_after_article_is_removed(self):
+        session = self.typing_session("active")
+        text = self.db.get(TypingText, session.text_id)
+        text.is_active = False
+        self.db.commit()
+        self.current = self.student
+        response = self.client.post("/api/typing/submit", json={
+            "typing_session_id": session.id,
+            "text_id": session.text_id,
+            "reference_text": "",
+            "typed_text": "指定的文章",
+            "duration_seconds": 60,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertGreater(response.json()["wpm"], 0)
 
     def test_static_route_cannot_escape_dist(self):
         response = self.client.get('/%2e%2e/secret.txt')

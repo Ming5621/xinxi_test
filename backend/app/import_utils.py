@@ -118,13 +118,18 @@ def _parse_question_type(raw: str) -> Optional[QuestionType]:
 
 
 def normalize_answer(answer: str, qtype: QuestionType) -> str:
-    answer = answer.strip()
+    answer = (answer or "").strip()
     if qtype == QuestionType.judge:
         if answer.lower() in {"对", "正确", "true", "t", "√", "是", "yes", "1"}:
             return "正确"
         if answer.lower() in {"错", "错误", "false", "f", "×", "否", "no", "0"}:
             return "错误"
         return answer
+    if qtype == QuestionType.choice:
+        # 导入常写成「B」或「B. CPU」，学生作答只提交字母。
+        match = re.match(r"^([A-Da-d])(?:[.、．:：\s].*)?$", answer)
+        if match:
+            return match.group(1).upper()
     return answer.upper()
 
 

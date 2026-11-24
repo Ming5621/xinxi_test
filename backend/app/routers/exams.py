@@ -1,3 +1,4 @@
+import math
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -52,6 +53,31 @@ def _exam_to_out(exam: Exam) -> ExamOut:
     )
 
 
+def _finite_number(value, default=0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return number
+
+
+def _typing_duration(client_duration, time_limit, answer_text: str) -> float:
+    """用时取学生端计时，并夹在 5 秒和题目限时之间。
+
+    不能再把用时缩短成「考试已经进行的秒数」。刚开考就交卷时，这个秒数可能不到 1，
+    正确的短文会被算成每分钟成千上万字，直接满分。
+    """
+    claimed = _finite_number(client_duration, 0)
+    if claimed <= 0:
+        claimed = max(30, len(answer_text or ""))
+    limit = _finite_number(time_limit, 120)
+    if limit <= 0:
+        limit = 120
+    return min(max(claimed, 5), limit)
+
+
 def _grade_session(session: ExamSession, db: Session):
     exam = session.exam
     total_score = 0.0
@@ -64,21 +90,21 @@ def _grade_session(session: ExamSession, db: Session):
             answer = Answer(session_id=session.id, question_id=question.id, student_answer="", is_correct=False, score=0)
             db.add(answer)
             continue
-        if not answer.student_answer.strip():
+        if not (answer.student_answer or "").strip():
             answer.is_correct = False
             answer.score = 0
             continue
 
         if question.type == QuestionType.typing:
             meta = answer.answer_meta or {}
-            wpm = meta.get("wpm", 0)
-            accuracy = meta.get("accuracy", 0)
+            wpm = _finite_number(meta.get("wpm"), 0)
+            accuracy = _finite_number(meta.get("accuracy"), 0)
             config = parse_typing_config(question.options)
             score, passed, remark = score_typing_question(wpm, accuracy, question.score, config)
             answer.is_correct = passed
             answer.score = score
-            min_accuracy = float(config.get("min_accuracy", 95))
-            level_name = get_typing_level(float(wpm or 0), float(accuracy or 0), min_accuracy)["level"]
+            min_accuracy = _finite_number(config.get("min_accuracy"), 95)
+            level_name = get_typing_level(wpm, accuracy, min_accuracy)["level"]
             answer.answer_meta = {**meta, "remark": remark, "level": level_name}
             total_score += score
         else:
@@ -407,7 +433,6 @@ def submit_exam(
 
     # 到点后仍接收这一次交卷。教室电脑时间可能偏慢，倒计时结束时如果直接拒绝，
     # 学生会看到「考试时间已结束」并且答卷一直交不出去。
-    elapsed = max((datetime.utcnow() - session.start_time).total_seconds(), 0)
 
     db.query(Answer).filter(Answer.session_id == session.id).delete()
     question_map = {q.id: q for q in exam.questions}
@@ -417,7 +442,6 @@ def submit_exam(
             continue
         answers_by_qid[item.question_id] = item
 
-    exam_elapsed = elapsed
     for qid, item in answers_by_qid.items():
         question = question_map[qid]
         meta = item.answer_meta or {}
@@ -425,12 +449,7 @@ def submit_exam(
         if question.type == QuestionType.typing:
             comparison = compare_text(question.content, item.student_answer)
             config = parse_typing_config(question.options)
-            time_limit = config.get("time_limit", 120)
-            client_duration = meta.get("duration_seconds")
-            if client_duration:
-                duration = min(max(float(client_duration), 5), time_limit, exam_elapsed)
-            else:
-                duration = min(max(30, len(item.student_answer)), time_limit, exam_elapsed)
+            duration = _typing_duration(meta.get("duration_seconds"), config.get("time_limit", 120), item.student_answer)
             meta = {
                 **meta,
                 "wpm": calculate_wpm(comparison["correct_chars"], duration),
@@ -480,6 +499,8 @@ def my_sessions(db: Session = Depends(get_db), current_user: User = Depends(requ
     result = []
     for s in sessions:
         exam = s.exam
+        if exam is None:
+            continue
         result.append(
             SessionOut(
                 id=s.id,
@@ -520,15 +541,19 @@ def get_session_detail(
         raise HTTPException(status_code=403, detail="无权查看该学生成绩")
 
     exam = session.exam
+    if exam is None:
+        raise HTTPException(status_code=404, detail="考试不存在")
     answers_out = []
     for ans in session.answers:
         q = ans.question
+        if q is None:
+            continue
         meta = ans.answer_meta
         if q.type == QuestionType.typing and meta:
             config = parse_typing_config(q.options)
-            wpm = float(meta.get("wpm") or 0)
-            accuracy = float(meta.get("accuracy") or 0)
-            min_accuracy = float(config.get("min_accuracy", 95))
+            wpm = _finite_number(meta.get("wpm"), 0)
+            accuracy = _finite_number(meta.get("accuracy"), 0)
+            min_accuracy = _finite_number(config.get("min_accuracy"), 95)
             _, _, remark = score_typing_question(wpm, accuracy, q.score, config)
             meta = {
                 **meta,
@@ -538,7 +563,7 @@ def get_session_detail(
         answers_out.append(
             {
                 "question_id": ans.question_id,
-                "student_answer": ans.student_answer,
+                "student_answer": ans.student_answer or "",
                 "is_correct": ans.is_correct,
                 "score": ans.score,
                 "correct_answer": q.correct_answer if session.status == SessionStatus.submitted and q.type != QuestionType.typing else None,

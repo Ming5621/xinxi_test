@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>控制台</h1>
-      <p>查看已登录学生，并发布考试 / 发起打字测试</p>
+      <p>查看学生人数和在线情况，并发布考试 / 发起打字测试</p>
     </div>
 
     <el-row :gutter="20" v-loading="loading">
@@ -73,7 +73,7 @@
               <el-icon :size="22"><User /></el-icon>
               <div class="action-text">
                 <strong>学生动态</strong>
-                <span>查看全部已登录学生（含离线）</span>
+                <span>查看全部学生（含离线）</span>
               </div>
             </el-button>
           </div>
@@ -129,10 +129,10 @@ let refreshTimer = null
 const statusText = { draft: '草稿', published: '进行中', ended: '已结束' }
 const statusTag = { draft: 'info', published: 'success', ended: 'warning' }
 
-const onlineStudents = computed(() => presence.value.filter((s) => s.is_online))
+const onlineStudents = computed(() => presence.value.filter((s) => s.is_online && s.is_active))
 
 const statCards = computed(() => [
-  { label: '已登录学生', value: stats.value.total_students || 0, icon: 'User', bg: '#eef2ff', color: '#4f46e5' },
+  { label: '学生人数', value: stats.value.total_students || 0, icon: 'User', bg: '#eef2ff', color: '#4f46e5' },
   { label: '当前在线', value: onlineStudents.value.length, icon: 'Connection', bg: '#ecfdf5', color: '#10b981' },
   { label: '进行中考试', value: stats.value.active_exams || 0, icon: 'Timer', bg: '#fff7ed', color: '#f59e0b' },
   { label: '考试总数', value: stats.value.total_exams || 0, icon: 'Document', bg: '#f0f9ff', color: '#0ea5e9' },

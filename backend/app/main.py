@@ -12,7 +12,7 @@ Base.metadata.create_all(bind=engine)
 migrate_student_passwords(engine)
 auth_signing_key()
 
-app = FastAPI(title="微机教室考试系统", version="1.2.14")
+app = FastAPI(title="微机教室考试系统", version="1.2.17")
 
 app.add_middleware(
     CORSMiddleware,
