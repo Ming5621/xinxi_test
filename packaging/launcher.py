@@ -112,7 +112,7 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-APP_VERSION = "1.2.18"
+APP_VERSION = "1.2.19"
 
 _PROXY_ENV_KEYS = (
     "HTTP_PROXY",

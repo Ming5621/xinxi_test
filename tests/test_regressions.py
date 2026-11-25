@@ -743,6 +743,10 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(self.client.get('/student/results').status_code, 200)
 
 
+# Include Windows installer data tests in the existing release CI entry point.
+from test_installer_upgrade import InstallerUpgradeTests
+
+
 if __name__ == '__main__':
     try:
         unittest.main()
