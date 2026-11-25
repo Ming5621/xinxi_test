@@ -85,7 +85,7 @@ begin
     ExpandConstant('{tmp}\upgrade_data.ps1') + '" -Mode ' + Mode +
     ' -ResultFile "' + Report + '"';
   if BackupRoot <> '' then Params := Params + ' -BackupRoot "' + BackupRoot + '"';
-  if OldInstallDir <> '' then Params := Params + ' -InstallDir "' + OldInstallDir + '"';
+  if OldInstallDir <> '' then Params := Params + ' -InstallDir "' + RemoveBackslashUnlessRoot(OldInstallDir) + '"';
   if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Result := '无法运行数据保护程序：' + SysErrorMessage(ResultCode)

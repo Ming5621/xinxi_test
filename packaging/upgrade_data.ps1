@@ -42,6 +42,15 @@ function Get-DataDirectories {
     return @($paths | Sort-Object -Unique)
 }
 
+function Get-SnapshotFiles([string]$Path, [string]$Prefix = '') {
+    foreach ($item in Get-ChildItem -LiteralPath $Path -Force) {
+        $relative = $item.Name
+        if ($Prefix) { $relative = Join-Path $Prefix $item.Name }
+        if ($item.PSIsContainer) { Get-SnapshotFiles $item.FullName $relative }
+        else { [PSCustomObject]@{ FullName = $item.FullName; RelativePath = $relative } }
+    }
+}
+
 function Assert-NoLinks([string]$Path) {
     if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw "Data directory is a link; upgrade stopped: $Path"
@@ -89,8 +98,10 @@ try {
             $destination = Join-Path $BackupRoot $slot
             New-Item -ItemType Directory -Path $destination | Out-Null
             $files = @()
-            foreach ($file in Get-ChildItem -LiteralPath $source -Recurse -File -Force) {
-                $relative = $file.FullName.Substring($source.TrimEnd('\', '/').Length + 1)
+            foreach ($file in Get-SnapshotFiles $source) {
+                # Build relative paths from names, not string lengths: Windows may
+                # expand an 8.3 input path (RUNNER~1) to a longer canonical path.
+                $relative = $file.RelativePath
                 $target = Join-Path $destination $relative
                 New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
                 Copy-Item -LiteralPath $file.FullName -Destination $target -Force
