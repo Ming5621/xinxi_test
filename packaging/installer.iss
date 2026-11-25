@@ -3,7 +3,7 @@
 ; 本文件必须保存为带 BOM 的 UTF-8，否则在中文 Windows 上目录名会乱码，卸载会删错位置。
 
 #define MyAppName "微机教室考试系统"
-#define MyAppVersion "1.2.17"
+#define MyAppVersion "1.2.18"
 #define MyAppPublisher "柴延明"
 #define MyAppExeName "ExamSystem.exe"
 #define MyDataDir "微机教室考试系统"
@@ -13,6 +13,10 @@ AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppCopyright=版权所有 © 柴延明 · 保留所有权利
+VersionInfoCopyright=版权所有 © 柴延明 · 保留所有权利
+InfoBeforeFile=copyright.txt
+DisableWelcomePage=no
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

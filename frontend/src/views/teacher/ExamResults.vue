@@ -67,7 +67,7 @@
               {{ ans.is_correct ? '✓' : '✗' }} {{ ans.score }}分
             </el-tag>
           </div>
-          <p>{{ ans.question_content }}</p>
+          <QuestionContent :content="ans.question_content" />
           <p class="detail-a">
             学生答案: <strong>{{ ans.student_answer }}</strong>
             <span v-if="!ans.is_correct"> · 正确答案: <strong>{{ ans.correct_answer }}</strong></span>
@@ -79,6 +79,7 @@
 </template>
 
 <script setup>
+import QuestionContent from '@/components/QuestionContent.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'

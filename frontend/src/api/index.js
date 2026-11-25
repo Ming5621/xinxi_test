@@ -190,6 +190,7 @@ export const typingApi = {
 }
 
 export const exportApi = {
+  examQuestions: (id, title) => downloadExport(`exams/${id}/questions`, {}, `考试题目_${title || id}.json`),
   students: (className) => downloadExport('students', { class_name: className }, `学生名单_${className || '全部'}.xlsx`),
   examResults: (examId, className, title) => downloadExport(`exams/${examId}/results`, { class_name: className }, `考试成绩_${title || examId}.xlsx`),
   typingRecords: (className) => downloadExport('typing/records', { class_name: className }, `打字成绩_${className || '全部'}.xlsx`),

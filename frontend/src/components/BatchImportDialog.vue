@@ -24,14 +24,14 @@
           drag
           :auto-upload="false"
           :limit="1"
-          accept=".csv,.txt,.tsv"
+          :accept="accept"
           :on-change="handleFileChange"
           :on-remove="() => (selectedFile = null)"
         >
           <el-icon :size="40"><UploadFilled /></el-icon>
           <div class="el-upload__text">拖拽文件到此处，或 <em>点击上传</em></div>
           <template #tip>
-            <div class="el-upload__tip">支持 .csv / .txt / .tsv 文件，UTF-8 或 GBK 编码</div>
+            <div class="el-upload__tip">支持 {{ accept }} 文件，UTF-8 或 GBK 编码</div>
           </template>
         </el-upload>
         <div v-if="showDefaultPassword" style="margin-top: 12px">
@@ -78,6 +78,7 @@ import { ElMessage } from 'element-plus'
 
 const props = defineProps({
   modelValue: Boolean,
+  accept: { type: String, default: '.csv,.txt,.tsv' },
   title: { type: String, default: '批量导入' },
   importMode: { type: String, default: 'import' }, // import | parse
   showDefaultPassword: Boolean,
@@ -170,7 +171,7 @@ async function handleImport() {
     errors.value = result.errors || []
     if (props.importMode === 'parse') {
       previewItems.value = (result.questions || []).slice(0, 10).map((q) => ({
-        type: q.type === 'choice' ? '选择题' : '判断题',
+        type: q.type === 'choice' ? '选择题' : q.type === 'typing' ? '打字题' : '判断题',
         content: q.content.length > 30 ? q.content.slice(0, 30) + '...' : q.content,
         correct_answer: q.correct_answer,
         score: q.score,

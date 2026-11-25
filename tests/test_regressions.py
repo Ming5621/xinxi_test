@@ -59,6 +59,47 @@ class RegressionTests(unittest.TestCase):
         self.db.commit()
         return session
 
+    def test_question_pack_roundtrip_and_ownership(self):
+        image = "![图片](data:image/png;base64," + "YQ==" * 40000 + ")"
+        content = "阅读代码\n```python\nif True:\n    print('<hello>')\n```\n" + image
+        questions = [
+            {"type": "choice", "content": content, "options": ["A.\n" + image, "B. 文本"], "correct_answer": "A", "score": 12},
+            {"type": "judge", "content": "多行\n判断题", "correct_answer": "正确", "score": 8},
+            {"type": "typing", "content": "大小写AbC", "correct_answer": "大小写AbC", "options": {"time_limit": 90, "min_wpm": 12}, "score": 18},
+        ]
+        created = self.client.post("/api/exams", json={"title": "图片代码测试", "questions": questions})
+        self.assertEqual(created.status_code, 200, created.text)
+        exam = created.json()
+        url = f"/api/export/exams/{exam['id']}/questions"
+        exported = self.client.get(url)
+        self.assertEqual(exported.status_code, 200, exported.text[:200])
+        self.assertIn("questions.json", exported.headers["content-disposition"])
+        parsed = self.client.post("/api/import/questions/file", files={"file": ("questions.json", exported.content, "application/json")})
+        self.assertEqual(parsed.status_code, 200, parsed.text[:200])
+        self.assertEqual(parsed.json()["errors"], [])
+        imported = parsed.json()["questions"]
+        self.assertEqual(imported[0]["content"], content)
+        self.assertEqual(imported[0]["options"], questions[0]["options"])
+        self.assertEqual(imported[2]["options"]["time_limit"], 90)
+        self.assertEqual(imported[2]["correct_answer"], "大小写AbC")
+        copied = self.client.post("/api/exams", json={"title": "重新组卷", "questions": imported})
+        self.assertEqual(copied.status_code, 200, copied.text[:200])
+        self.assertEqual(copied.json()["questions"][0]["content"], content)
+        self.current = self.other
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.current = self.student
+        self.assertNotEqual(self.client.get(url).status_code, 200)
+
+    def test_question_pack_rejects_invalid_items_without_partial_import(self):
+        import json
+        payload = {"questions": [
+            {"type": "judge", "content": "正常题目", "correct_answer": "正确"},
+            {"type": "choice", "content": "错误答案", "options": ["A", "B"], "correct_answer": "D"},
+        ]}
+        result = self.client.post("/api/import/questions/parse", json={"text": json.dumps(payload)}).json()
+        self.assertEqual(result["questions"], [])
+        self.assertTrue(result["errors"])
+
     def test_editing_answered_exam_preserves_results(self):
         exam = self.exam()
         self.client.post(f"/api/exams/{exam['id']}/publish")

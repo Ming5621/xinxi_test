@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>{{ isEdit ? '编辑考试' : '创建考试' }}</h1>
       <p>设置考试信息和题目内容</p>
+      <el-button v-if="isEdit" @click="exportQuestions">导出已保存题目</el-button>
     </div>
 
     <div class="content-card" v-loading="loading">
@@ -66,7 +67,9 @@
           </div>
         </div>
 
-        <el-input v-model="q.content" type="textarea" :rows="q.type === 'typing' ? 4 : 2" :placeholder="q.type === 'typing' ? '请输入需要学生录入的文本内容' : '请输入题目内容'" style="margin-bottom: 12px" />
+        <el-input v-if="q.type === 'typing'" v-model="q.content" type="textarea" :rows="q.type === 'typing' ? 4 : 2" :placeholder="q.type === 'typing' ? '请输入需要学生录入的文本内容' : '请输入题目内容'" style="margin-bottom: 12px" />
+
+        <QuestionEditor v-if="q.type !== 'typing'" v-model="q.content" :disabled="hasSessions" placeholder="请输入题目内容，可插入图片和代码块" />
 
         <template v-if="q.type === 'typing'">
           <el-row :gutter="12">
@@ -91,7 +94,7 @@
             <el-radio v-model="q.correct_answer" :value="['A','B','C','D'][oi]">
               {{ ['A','B','C','D'][oi] }}
             </el-radio>
-            <el-input v-model="q.options[oi]" :placeholder="`选项 ${['A','B','C','D'][oi]}`" />
+            <QuestionEditor :disabled="hasSessions" v-model="q.options[oi]" :placeholder="`选项 ${['A','B','C','D'][oi]}`" />
           </div>
         </template>
 
@@ -117,7 +120,8 @@
       v-model="importVisible"
       title="批量导入题目"
       import-mode="parse"
-      format-hint="支持 CSV 表格格式或块格式。CSV 适合 Excel 编辑，块格式适合直接粘贴。"
+      accept=".csv,.txt,.tsv,.json"
+      format-hint="支持导出的 JSON 题目包、CSV 表格或块格式；导入后可编辑、删除题目再组卷。"
       placeholder="[选择] 以下哪个是计算机的中央处理器？
 A. 内存
 B. CPU
@@ -148,7 +152,8 @@ D. 显卡
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { examApi, importApi } from '@/api'
+import { examApi, importApi, exportApi } from '@/api'
+import QuestionEditor from '@/components/QuestionEditor.vue'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 
 const questionTemplate = `类型,题目,选项A,选项B,选项C,选项D,答案,分值
@@ -204,6 +209,7 @@ function handleQuestionsImported(questions) {
       correct_answer: q.correct_answer,
       score: q.score,
       order_num: startOrder + i,
+      typing_config: q.type === 'typing' ? { ...q.options } : undefined,
     })
   }
 }
@@ -245,6 +251,11 @@ onMounted(async () => {
   }
 })
 
+async function exportQuestions() {
+  await exportApi.examQuestions(Number(route.params.id), form.value.title)
+  ElMessage.success('已导出已保存的题目；未保存修改请先保存')
+}
+
 async function handleSave() {
   if (!form.value.title) return ElMessage.warning('请输入考试名称')
   if (form.value.questions.length === 0) return ElMessage.warning('请至少添加一道题目')
@@ -256,7 +267,7 @@ async function handleSave() {
   try {
     const payload = {
       ...form.value,
-      questions: form.value.questions.map((q) => {
+      questions: form.value.questions.map((q, index) => {
         if (q.type === 'typing') {
           return {
             type: q.type,
@@ -264,7 +275,7 @@ async function handleSave() {
             options: q.typing_config || {},
             correct_answer: q.content,
             score: q.score,
-            order_num: q.order_num,
+            order_num: index,
           }
         }
         return {
@@ -273,7 +284,7 @@ async function handleSave() {
           options: q.options,
           correct_answer: q.correct_answer,
           score: q.score,
-          order_num: q.order_num,
+          order_num: index,
         }
       }),
     }

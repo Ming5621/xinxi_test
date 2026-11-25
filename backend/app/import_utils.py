@@ -1,6 +1,7 @@
 """批量导入解析工具"""
 import csv
 import io
+import json
 import math
 import re
 from typing import Optional
@@ -138,6 +139,36 @@ def parse_questions_text(text: str, default_score: float = 10.0) -> tuple[list[d
     text = text.lstrip("\ufeff").strip()
     if not text:
         return [], ["导入内容为空"]
+
+    if text.startswith(("{", "[")) and not re.match(r"^\[(选择|判断|choice|judge)\]", text, re.I):
+        from pydantic import ValidationError
+        from .schemas import QuestionCreate
+        try:
+            payload = json.loads(text)
+            items = payload.get("questions") if isinstance(payload, dict) else payload
+            if not isinstance(items, list):
+                return [], ["题目包必须包含 questions 数组"]
+            questions, errors = [], []
+            for index, item in enumerate(items, 1):
+                try:
+                    question = QuestionCreate.model_validate(item)
+                    if not question.content.strip():
+                        raise ValueError("题目内容不能为空")
+                    if question.type == QuestionType.choice:
+                        if not isinstance(question.options, list) or not 2 <= len(question.options) <= 4:
+                            raise ValueError("选择题需要 2 至 4 个选项")
+                        if question.correct_answer not in list("ABCD")[:len(question.options)]:
+                            raise ValueError("选择题答案必须对应选项字母")
+                    elif question.type == QuestionType.judge and question.correct_answer not in ("正确", "错误"):
+                        raise ValueError("判断题答案必须为正确或错误")
+                    question.order_num = len(questions)
+                    questions.append(question.model_dump())
+                except (ValidationError, ValueError) as exc:
+                    errors.append(f"第 {index} 题：格式无效（{str(exc)[:200]}）")
+            # A question pack is imported atomically, so errors cannot silently drop questions.
+            return ([], errors) if errors else (questions, [])
+        except (json.JSONDecodeError, RecursionError):
+            return [], ["题目包 JSON 格式无效"]
 
     # 优先尝试 CSV 格式
     first_line = text.split("\n")[0]

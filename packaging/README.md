@@ -42,6 +42,8 @@ packaging\build_installer.bat
 
 生成：`release\ExamSystem-Setup.exe`
 
+v1.2.18 起安装向导会在安装前展示版权信息（版权所有 © 柴延明，保留所有权利），EXE 文件属性也包含版权声明。版权文字维护于 `packaging/copyright.txt`，须保留 UTF-8 BOM 编码。
+
 ---
 
 ## 局域网部署

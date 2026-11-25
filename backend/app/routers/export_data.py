@@ -99,6 +99,33 @@ def export_teacher_pack(
     )
 
 
+@router.get("/exams/{exam_id}/questions")
+def export_exam_questions(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    from ..schemas import QuestionCreate
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    ensure_owns_exam(current_user, exam)
+    payload = {
+        "format": "exam-questions",
+        "version": 1,
+        "title": exam.title,
+        "questions": [
+            QuestionCreate(type=q.type, content=q.content, options=q.options,
+                           correct_answer=q.correct_answer, score=q.score, order_num=i).model_dump(mode="json")
+            for i, q in enumerate(sorted(exam.questions, key=lambda q: (q.order_num, q.id)))
+        ],
+    }
+    filename = quote(f"考试题目_{exam.title}.json")
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=questions.json; filename*=UTF-8''{filename}"},
+    )
+
+
 @router.get("/exams/{exam_id}/results")
 def export_exam_results(
     exam_id: int,

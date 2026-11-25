@@ -33,7 +33,7 @@
             {{ ans.is_correct ? '正确' : '错误' }} · {{ ans.score }} 分
           </el-tag>
         </div>
-        <p class="answer-question">{{ ans.question_content }}</p>
+        <QuestionContent class="answer-question" :content="ans.question_content" />
         <div class="answer-detail" v-if="ans.answer_meta?.wpm">
           <span>打字速度: <strong>{{ ans.answer_meta.wpm }} 字/分钟</strong></span>
           <span>准确率: <strong>{{ ans.answer_meta.accuracy }}%</strong></span>
@@ -49,6 +49,7 @@
 </template>
 
 <script setup>
+import QuestionContent from '@/components/QuestionContent.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { examApi } from '@/api'

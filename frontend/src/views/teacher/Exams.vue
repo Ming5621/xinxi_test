@@ -33,11 +33,12 @@
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="400" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="$router.push(`/teacher/exams/${row.id}/edit`)">编辑</el-button>
             <el-button v-if="row.status === 'draft'" link type="success" @click="handlePublish(row)">发布</el-button>
             <el-button v-if="row.status === 'published'" link type="warning" @click="handleEnd(row)">结束</el-button>
+            <el-button link type="primary" @click="handleExportQuestions(row)">导出题目</el-button>
             <el-button link @click="$router.push(`/teacher/exams/${row.id}/results`)">成绩</el-button>
             <el-button link @click="$router.push(`/teacher/exams/${row.id}/stats`)">统计</el-button>
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
@@ -51,7 +52,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { examApi } from '@/api'
+import { examApi, exportApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime'
 
 const loading = ref(true)
@@ -68,6 +69,11 @@ const filteredExams = computed(() => {
 
 function formatDate(d) {
   return formatDateTime(d)
+}
+
+async function handleExportQuestions(row) {
+  await exportApi.examQuestions(row.id, row.title)
+  ElMessage.success('题目包已导出，可在创建或编辑考试时批量导入')
 }
 
 async function handlePublish(row) {

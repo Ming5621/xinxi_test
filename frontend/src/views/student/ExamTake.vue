@@ -53,7 +53,7 @@
         </div>
 
         <template v-if="currentQuestion.type !== 'typing'">
-        <div class="question-content">{{ currentQuestion.content }}</div>
+        <QuestionContent class="question-content" :content="currentQuestion.content" />
 
         <div class="options" v-if="currentQuestion.type === 'choice'">
           <div
@@ -64,7 +64,7 @@
             @click="selectAnswer(currentQuestion.id, opt.value)"
           >
             <span class="option-letter">{{ opt.letter }}</span>
-            <span class="option-text">{{ opt.text }}</span>
+            <QuestionContent class="option-text" :content="opt.text" />
           </div>
         </div>
 
@@ -146,6 +146,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { examApi } from '@/api'
+import QuestionContent from '@/components/QuestionContent.vue'
 import TypingTest from '@/components/TypingTest.vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -277,7 +278,7 @@ function choiceOptions(question) {
   const raw = Array.isArray(question.options) ? question.options : []
   return raw.map((opt, i) => {
     const text = String(opt ?? '')
-    const m = text.match(/^\s*([A-Da-d])[.、．:：\s]\s*(.*)$/)
+    const m = text.match(/^\s*([A-Da-d])[.、．:：\s]\s*([\s\S]*)$/)
     if (m) {
       return { letter: m[1].toUpperCase(), value: m[1].toUpperCase(), text: m[2] || text }
     }
