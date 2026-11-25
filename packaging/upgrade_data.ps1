@@ -10,6 +10,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $DataName = '微机教室考试系统'
 
+function Get-DataHash([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '') }
+    finally { $algorithm.Dispose(); $stream.Dispose() }
+}
+
 function Get-DataDirectories {
     if ($TestRoot) {
         return @((Join-Path $TestRoot "user/$DataName"), (Join-Path $TestRoot "other/$DataName"), (Join-Path $TestRoot "common/$DataName"))
@@ -87,8 +94,8 @@ try {
                 $target = Join-Path $destination $relative
                 New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
                 Copy-Item -LiteralPath $file.FullName -Destination $target -Force
-                $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-                if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $hash) { throw "Backup verification failed: $relative" }
+                $hash = (Get-DataHash $file.FullName)
+                if ((Get-DataHash $target) -ne $hash) { throw "Backup verification failed: $relative" }
                 $files += @{ path = $relative; sha256 = $hash }
             }
             $manifest += @{ source = $source; slot = $slot; files = @($files) }
@@ -101,7 +108,7 @@ try {
         foreach ($entry in $manifest.directories) {
             foreach ($file in $entry.files) {
                 $source = Join-Path (Join-Path $BackupRoot $entry.slot) $file.path
-                if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne $file.sha256) { throw "Damaged backup: $source" }
+                if ((Get-DataHash $source) -ne $file.sha256) { throw "Damaged backup: $source" }
             }
         }
         foreach ($entry in $manifest.directories) {
@@ -110,10 +117,10 @@ try {
             foreach ($file in $entry.files) {
                 $target = Join-Path $entry.source $file.path
                 # New uninstallers preserve data in place: do not touch identical files.
-                if ((Test-Path -LiteralPath $target -PathType Leaf) -and (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq $file.sha256) { continue }
+                if ((Test-Path -LiteralPath $target -PathType Leaf) -and (Get-DataHash $target) -eq $file.sha256) { continue }
                 New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
                 Copy-Item -LiteralPath (Join-Path (Join-Path $BackupRoot $entry.slot) $file.path) -Destination $target -Force
-                if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $file.sha256) { throw "Restore verification failed: $target" }
+                if ((Get-DataHash $target) -ne $file.sha256) { throw "Restore verification failed: $target" }
             }
         }
     } elseif ($Mode -eq 'clear') {

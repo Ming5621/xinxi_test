@@ -2,6 +2,7 @@
 
 All paths are isolated fixtures; never enumerates/deletes the machine's actual data.
 """
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -24,9 +25,10 @@ class InstallerUpgradeTests(unittest.TestCase):
         self.dirs = [self.root / user / '微机教室考试系统' for user in ('user', 'other', 'common')]
         for index, folder in enumerate(self.dirs):
             folder.mkdir(parents=True)
-            with sqlite3.connect(folder / 'exam_system.db') as db:
+            with closing(sqlite3.connect(folder / 'exam_system.db')) as db:
                 db.execute('CREATE TABLE preserved (id INTEGER PRIMARY KEY, content BLOB)')
                 db.execute('INSERT INTO preserved(content) VALUES (?)', (f'账号、题目、成绩-{index}'.encode(),))
+                db.commit()
             (folder / 'exam_system.db-wal').write_bytes(b'wal-sidecar-fixture')
             (folder / 'exam_system.db-shm').write_bytes(b'shm-sidecar-fixture')
             (folder / 'images').mkdir()
@@ -68,7 +70,7 @@ class InstallerUpgradeTests(unittest.TestCase):
             # The test sidecars aren't real SQLite WAL files; remove before opening.
             (directory / 'exam_system.db-wal').unlink()
             (directory / 'exam_system.db-shm').unlink()
-            with sqlite3.connect(directory / 'exam_system.db') as db:
+            with closing(sqlite3.connect(directory / 'exam_system.db')) as db:
                 self.assertEqual(db.execute('SELECT content FROM preserved').fetchone()[0], f'账号、题目、成绩-{index}'.encode())
 
     def test_modern_uninstaller_keeps_files_untouched(self):
